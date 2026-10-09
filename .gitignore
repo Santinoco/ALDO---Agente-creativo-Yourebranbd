@@ -1,5 +1,6 @@
 .venv/
 .env
+data/miramarExpress/
 venv/
 __pycache__/
 *.egg-info/
