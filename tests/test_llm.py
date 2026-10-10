@@ -2,6 +2,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel, ConfigDict, Field
 
 from yourebrand.core import llm
 from yourebrand.core.providers import ProviderResult
@@ -17,17 +18,20 @@ class StubProvider:
 
     def __init__(self):
         self.calls = []
+        self.text = "hola mundo"
         self.truncated = False
+        self.refused = False
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
         return ProviderResult(
-            text="hola mundo",
+            text=self.text,
             model=kwargs["model"],
             input_tokens=10,
             output_tokens=5,
             stop_reason="max_tokens" if self.truncated else "end_turn",
             truncated=self.truncated,
+            refused=self.refused,
         )
 
 
@@ -98,3 +102,86 @@ def test_warns_when_response_is_truncated(provider, caplog):
 
 def test_new_run_id_is_unique():
     assert llm.new_run_id() != llm.new_run_id()
+
+
+class Note(BaseModel):
+    """Schema mínimo para probar la salida estructurada."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+
+
+def complete_note(**overrides):
+    return llm.complete_structured(
+        system="sos un asistente", prompt="hola", schema=Note, tenant=TENANT, run_id="run-1", **overrides
+    )
+
+
+def test_structured_returns_validated_data_and_usage(provider):
+    provider.text = '{"title": "Primera idea"}'
+
+    result = complete_note()
+
+    assert result.data == Note(title="Primera idea")
+    assert result.response.provider == "stub"
+    assert result.response.input_tokens == 10
+    assert result.response.run_id == "run-1"
+
+
+def test_structured_sends_standard_json_schema_to_provider(provider):
+    provider.text = '{"title": "Primera idea"}'
+
+    complete_note(max_tokens=300)
+
+    assert provider.calls[0] == {
+        "model": "model-gen",
+        "system": "sos un asistente",
+        "prompt": "hola",
+        "max_tokens": 300,
+        "output_schema": Note.model_json_schema(),
+    }
+
+
+def test_structured_fails_when_model_refuses(provider):
+    provider.refused = True
+
+    with pytest.raises(llm.RefusedOutputError):
+        complete_note()
+
+
+def test_structured_fails_when_response_is_truncated(provider):
+    provider.text = '{"title": "Prim'
+    provider.truncated = True
+
+    with pytest.raises(llm.TruncatedOutputError):
+        complete_note()
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["no es json", '{"title": ""}', '{"title": "ok", "extra": "dato"}', "{}"],
+)
+def test_structured_fails_when_output_does_not_match_schema(provider, text):
+    provider.text = text
+
+    with pytest.raises(llm.InvalidOutputError):
+        complete_note()
+
+
+def test_structured_error_names_fields_without_content(provider):
+    provider.text = '{"title": "", "extra": "dato confidencial"}'
+
+    with pytest.raises(llm.InvalidOutputError) as error:
+        complete_note()
+
+    assert "title" in str(error.value)
+    assert "run_id=run-1" in str(error.value)
+    assert "dato confidencial" not in str(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__suppress_context__ is True
+
+
+def test_output_errors_share_a_base_class():
+    for error in (llm.RefusedOutputError, llm.TruncatedOutputError, llm.InvalidOutputError):
+        assert issubclass(error, llm.LLMOutputError)
