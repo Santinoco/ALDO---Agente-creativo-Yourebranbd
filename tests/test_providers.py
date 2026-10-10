@@ -67,6 +67,43 @@ def test_anthropic_marks_truncated_response(fake_sdk, monkeypatch):
     assert generate(AnthropicProvider("sk-test")).truncated is True
 
 
+def test_anthropic_marks_refused_response(fake_sdk, monkeypatch):
+    monkeypatch.setattr(fake_sdk, "stop_reason", "refusal")
+
+    assert generate(AnthropicProvider("sk-test")).refused is True
+
+
+def test_anthropic_sends_output_schema_as_json_schema_format(fake_sdk):
+    provider = AnthropicProvider("sk-test")
+    schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+
+    provider.generate(model="model-gen", system="s", prompt="p", max_tokens=300, output_schema=schema)
+
+    output_format = provider._client.calls[0]["output_config"]["format"]
+    assert output_format["type"] == "json_schema"
+    assert output_format["schema"]["properties"] == {"title": {"type": "string"}}
+
+
+def test_anthropic_removes_constraints_the_api_does_not_support(fake_sdk):
+    provider = AnthropicProvider("sk-test")
+    schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string", "minLength": 1}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+
+    provider.generate(model="model-gen", system="s", prompt="p", max_tokens=300, output_schema=schema)
+
+    sent = provider._client.calls[0]["output_config"]["format"]["schema"]
+    assert "minLength" not in sent["properties"]["title"]
+
+
 def test_build_provider_uses_configured_provider(fake_sdk):
     settings = SimpleNamespace(llm_provider="anthropic", anthropic_api_key=SecretStr("sk-test"))
 
