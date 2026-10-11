@@ -1,21 +1,19 @@
 # Plan de desarrollo por iteraciones
 
+Plan hasta la entrega del Trabajo Final Integrador (TFI): **domingo 8 de noviembre de 2026, 23:59 h**. El alcance y las decisiones de arquitectura están en `CLAUDE.md`; este archivo detalla qué se construye en cada iteración.
+
 Cada iteración termina con algo que funciona y se puede mostrar. No se empieza una iteración hasta cumplir el "Listo cuando" de la anterior.
 
-Si aparece una idea que no está en la iteración actual, se anota en la iteración donde corresponde y se sigue con lo que toca.
+Si aparece una idea que no está en la iteración actual, se anota en la iteración donde corresponde y se sigue con lo que toca. Si no entra en ninguna, va a "Después del TFI".
 
-| # | Iteración | Estado |
-|---|---|---|
-| 0 | Base común (`core/`) | Hecha |
-| 1 | Creativo mínimo: ideas desde archivos | **Siguiente** |
-| 2 | Aislamiento y evaluación | Pendiente |
-| 3 | Refinamiento de ideas | Pendiente |
-| 4 | Datos reales en Supabase | Pendiente |
-| 5 | API y uso por el equipo | Pendiente |
-| 6 | Retrieval con Qdrant (condicional) | Pendiente |
-| 7 | Extractor de tareas (Fathom a Notion) | Pendiente |
-| 8 | Agente Supervisor | Pendiente |
-| - | Generación de imágenes | Postergada, sin fecha |
+| # | Iteración | Fecha objetivo | Requisitos del TFI que cierra | Estado |
+|---|---|---|---|---|
+| 0 | Base común (`core/`) | | | Hecha |
+| 1 | Creativo mínimo: ideas desde archivos | | | Hecha |
+| 2 | Agente con tools | 18/10 | Capacidad agéntica, skill | **Siguiente** |
+| 3 | Estado, HITL y Notion | 25/10 | Estado y memoria, human-in-the-loop, integración externa | Pendiente |
+| 4 | Interfaz y reproducibilidad | 1/11 | Interfaz accesible, ejecución reproducible | Pendiente |
+| 5 | Evaluación y entrega | 8/11 | Evidencia de calidad, README, demo | Pendiente |
 
 ---
 
@@ -30,165 +28,144 @@ Si aparece una idea que no está en la iteración actual, se anota en la iteraci
 - `core/llm.py`: `complete`, con registro de tokens, latencia y `run_id`.
 - Tests de los cuatro módulos.
 
-**Quedó pendiente:** probar una llamada real a Claude. Se resuelve al empezar la iteración 1.
-
 ---
 
-## Iteración 1: Creativo mínimo
+## Iteración 1: Creativo mínimo (hecha)
 
 **Objetivo:** pedir ideas para un cliente ficticio y recibir una lista de ideas alineadas a su marca.
 
-**Implementar:**
-- `.env` con `ANTHROPIC_API_KEY` y una llamada real de prueba.
-- Cliente ficticio en `data/acme/`: `brand.md` (información de la empresa) y `posts.md` (posts anteriores en texto, opcional).
+**Implementado:**
+- Cliente ficticio en `data/tambor/`: `brand.md` y `posts.md`.
 - `creative/context.py`: lee marca y posts del cliente. Funciona aunque no haya posts.
 - `creative/prompts.py`: arma las instrucciones y el pedido.
-- `core/llm.py`: función para salida estructurada (que el modelo devuelva una lista validada con Pydantic).
-- `creative/ideas.py`: `generate_ideas(tenant, content_type, count)`, con `content_type` igual a `"ugc"` o `"design"`.
-- Una forma de ejecutarlo desde la terminal, para ver las ideas sin levantar un servidor.
+- `creative/schemas.py`: forma validada de una idea.
+- `core/llm.py`: `complete_structured`, salida validada con Pydantic.
+- `creative/ideas.py`: `generate_ideas(tenant, content_type, count)` como secuencia fija.
 - Tests con el proveedor simulado.
 
-**No implementar todavía:**
-- Qdrant, Supabase, FastAPI.
-- Refinamiento de ideas o conversación de ida y vuelta.
-- Copys, guiones o imágenes: solo ideas.
-- Guardar las ideas generadas en algún lado.
-
-**Listo cuando:** desde la terminal se piden 5 ideas UGC y 5 de diseño para `acme`, y las ideas mencionan cosas propias de esa marca.
+**Quedó pendiente:** confirmar una llamada real a Claude con el `.env` y una forma de ejecutarlo desde la terminal. Las dos cosas se resuelven al empezar la iteración 2.
 
 ---
 
-## Iteración 2: Aislamiento y evaluación
+## Iteración 2: Agente con tools
 
-**Objetivo:** demostrar que los clientes no se mezclan y tener una medida de calidad contra la cual comparar cambios futuros.
+**Objetivo:** que el modelo decida qué hacer en cada turno de una conversación, en vez de seguir una secuencia fija.
+
+Es la iteración más pesada y la que más pesa en la nota: sin ella no hay diseño agéntico (25%) ni recorrido de punta a punta (30%).
 
 **Implementar:**
-- Segundo cliente ficticio, de un rubro bien distinto al primero.
+- Una llamada real a Claude con el `.env`, antes que nada.
+- Soporte de tools en `core/providers.py` y `core/llm.py`: mandar las definiciones de las tools, recibir los pedidos de uso del modelo y devolverle los resultados. Mantiene el registro de tokens, latencia y `run_id`.
+- Estado del grafo: mensajes de la conversación, `client_id` de la sesión, ideas generadas y `run_id`.
+- Grafo de LangGraph con dos nodos propios: el que llama al modelo y el que ejecuta las tools. Sin los prearmados (`create_react_agent`, `ToolNode`).
+- Tools, cada una con entradas y salidas validadas con Pydantic:
+  - `get_brand_info`: información de la marca.
+  - `get_previous_posts`: posts anteriores, si hay.
+  - `generate_ideas`: usa por dentro el `generate_ideas` de la iteración 1.
+  - `refine_idea`: ajusta una idea ya generada según un comentario.
+- Las tools leen el `client_id` del estado; no lo reciben como argumento.
+- Manejo de errores: si una tool falla, el error vuelve al modelo como resultado de la tool.
+- Skills `ugc-ideation` y `design-ideation`, armadas a partir de las guías de `creative/prompts.py`.
+- Chat desde la terminal, que registre qué tool se eligió en cada turno.
+- Tests de cada tool, del nodo que las ejecuta (incluido el caso de error) y del grafo con el proveedor simulado.
+
+**No implementar todavía:**
+- Persistencia: la conversación vive mientras dura el proceso.
+- Notion y cualquier escritura en sistemas externos.
+- FastAPI.
+- Qdrant, Supabase, un segundo agente.
+
+**Listo cuando:** desde la terminal, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y el registro muestra que el modelo eligió tools distintas en cada turno.
+
+---
+
+## Iteración 3: Estado, HITL y Notion
+
+**Objetivo:** que la sesión sobreviva a un reinicio y que el agente guarde ideas en Notion solo con aprobación de una persona.
+
+**Implementar:**
+- Checkpointer SQLite: cada sesión se identifica y se puede retomar.
+- Cliente de Notion en `core/`, único lugar donde se importa su SDK. Variables nuevas en `core/config.py` y `.env.example`: clave de Notion e id de la base de datos destino.
+- Tool `save_ideas_to_notion` con pausa (`interrupt`): el agente propone qué ideas guardar y se detiene. La persona puede:
+  - aprobar: se guardan como están;
+  - modificar: se guardan con los cambios;
+  - rechazar: no se guarda nada y el agente sigue la conversación.
+- Segundo cliente ficticio, de un rubro bien distinto a `tambor`.
 - Test de aislamiento: lo generado para el cliente A no contiene información del cliente B, y un `client_id` inexistente o inválido falla.
-- Set de evaluación: una lista fija de pedidos por cliente.
-- Script que corre el set y guarda las ideas en `artifacts/`.
-- Rúbrica simple para puntuar a mano (encaja con la marca, es original, es realizable) y la primera puntuación como línea base.
+- Test del recorrido principal completo, con Notion simulado: pedido, tools, pausa, aprobación, guardado.
+- El chat de terminal pasa a soportar la pausa y a retomar una sesión existente.
 
 **No implementar todavía:**
-- Evaluación automática con otro modelo como juez.
-- Dashboards o herramientas de observabilidad.
-
-**Listo cuando:** el test de aislamiento pasa y hay un reporte en `artifacts/` con la línea base puntuada.
-
----
-
-## Iteración 3: Refinamiento de ideas
-
-**Objetivo:** que el empleado pueda mejorar una idea en vez de pedir todo de nuevo.
-
-**Implementar:**
-- `refine_idea(tenant, idea, feedback)`: devuelve la idea ajustada según el comentario.
-- Que las ideas nuevas no repitan lo que ya está en los posts anteriores.
-- Ajustes de prompt guiados por la evaluación de la iteración 2, volviendo a medir después de cada cambio.
-
-**No implementar todavía:**
-- Memoria de conversaciones entre sesiones.
-- LangGraph o agentes que deciden pasos por su cuenta.
-
-**Listo cuando:** se puede refinar una idea con un comentario y la puntuación del set de evaluación no empeora respecto de la línea base.
-
----
-
-## Iteración 4: Datos reales en Supabase
-
-**Objetivo:** dejar de leer de `data/` y trabajar con clientes reales.
-
-**Implementar:**
-- Tablas en Supabase: clientes, información de marca, posts anteriores.
-- `core/db.py`: toda consulta exige un `TenantContext` y filtra por `client_id` en un solo lugar.
-- `creative/context.py` pasa a leer de Supabase; `data/` queda solo para tests.
-- Carga de uno o dos clientes reales.
-- Guardar las ideas generadas, con su `run_id`.
-- Test de aislamiento repetido contra la base.
-
-**No implementar todavía:**
+- FastAPI y la pantalla.
+- Memoria compartida entre sesiones o entre clientes.
 - Usuarios y permisos por empleado.
-- Carga automática de posts desde las redes.
+- Supabase.
 
-**Listo cuando:** se generan ideas para un cliente real leyendo de Supabase y el test de aislamiento pasa contra la base.
+**Listo cuando:** desde la terminal se generan ideas, se pide guardar dos, el agente se pausa, se cierra el proceso, se vuelve a abrir la misma sesión, se aprueba modificando una, y las dos aparecen en Notion. El test de aislamiento pasa.
 
 ---
 
-## Iteración 5: API y uso por el equipo
+## Iteración 4: Interfaz y reproducibilidad
 
-**Objetivo:** que un empleado de la agencia use el agente sin tocar código.
-
-**Decidir antes de empezar:** por dónde lo va a usar el equipo (una web simple, Slack, Notion u otra cosa).
+**Objetivo:** que alguien que no escribió el código pueda instalar el proyecto y usarlo desde el navegador.
 
 **Implementar:**
-- `api/`: endpoints de FastAPI para generar y refinar ideas. Sin lógica de negocio, solo llaman a `creative/`.
-- Autenticación básica y qué empleado puede ver qué cliente.
-- La interfaz elegida, en su versión más simple.
-- Prueba con dos o tres personas del equipo y registro de lo que piden cambiar.
+- `api/` con endpoints de FastAPI, sin lógica de negocio:
+  - listar clientes disponibles;
+  - abrir una sesión para un cliente;
+  - enviar un mensaje;
+  - resolver una pausa (aprobar, modificar o rechazar).
+- Pantalla mínima: elegir cliente, conversar, ver las ideas y resolver la aprobación.
+- `Dockerfile` y `docker-compose.yml`.
+- `.env.example` completo y sin secretos.
+- Set de evaluación en `evals/`: pedidos fijos por cliente, cada uno con la tool que se espera que el agente elija.
+- Script que corre el set y guarda las salidas en `artifacts/`.
+- Prueba de instalación desde cero: clonar en otra carpeta y seguir los pasos escritos.
 
 **No implementar todavía:**
-- Despliegue con alta disponibilidad o escalado.
-- Funciones que nadie del equipo pidió.
+- Autenticación y permisos.
+- Despliegue en la nube.
+- Respuestas en streaming.
+- Funciones que no estén en el recorrido de la demo.
 
-**Listo cuando:** una persona de la agencia genera ideas para un cliente real por su cuenta.
+**Si la iteración se atrasa:** la pantalla se reemplaza por la documentación interactiva de FastAPI (`/docs`) y Docker por un procedimiento de instalación verificable. La consigna acepta las dos cosas.
+
+**Listo cuando:** con un clon nuevo del repositorio y siguiendo solo las instrucciones escritas, se levanta la aplicación y se completa el recorrido de la demo desde el navegador.
 
 ---
 
-## Iteración 6: Retrieval con Qdrant (condicional)
+## Iteración 5: Evaluación y entrega
 
-**Solo se hace si** el material de algún cliente ya no entra en el prompt, o si la calidad cae por exceso de contexto. Si no pasa, se saltea.
+**Objetivo:** medir el agente, documentarlo y entregar.
 
-**Objetivo:** mandar al modelo solo el material relevante para cada pedido.
+A partir de acá no se agregan funciones: solo se corrige lo que la evaluación muestre.
 
 **Implementar:**
-- `core/vectorstore.py`: búsqueda que exige `TenantContext` y filtra por `client_id`.
-- Indexado de marca y posts por cliente.
-- `creative/context.py` usa la búsqueda en vez de mandar todo.
-- Comparación con el set de evaluación: con retrieval contra sin retrieval.
+- Correr el set de evaluación y guardar los resultados en `artifacts/` con sus métricas: éxito de la tarea, tool elegida contra tool esperada, cantidad de pasos, latencia, costo y errores.
+- Rúbrica simple para puntuar a mano la calidad de las ideas (encaja con la marca, es original, es realizable) y la puntuación obtenida.
+- Corrección de los problemas que aparezcan, volviendo a medir después de cada cambio.
+- `README.md` con las 13 secciones de la consigna: nombre, integrantes, problema, usuario, descripción, arquitectura, decisiones técnicas, instalación, configuración, ejecución, uso, evaluación y limitaciones.
+- Diagrama de arquitectura en `docs/`, que coincida con lo implementado: modelo, tools, skills, estado, HITL e integración con Notion.
+- Decisiones técnicas justificadas: agente único, LangGraph con nodos propios, sin RAG, SQLite, dónde va la pausa.
+- Video de respaldo de 3 a 5 minutos: el problema, el sistema funcionando, una decisión del agente, una tool, la pausa y el resultado.
+- Revisión de que no haya credenciales en el repositorio ni en su historial.
+- Tag `v1.0-tfi`.
+- Datos para el espacio de entrega: nombre, integrantes, URL del repositorio, URL del video y descripción de hasta 5 líneas.
 
-**No implementar todavía:**
-- Reranking, búsqueda híbrida u otras mejoras, salvo que la medición las pida.
+**No implementar:**
+- Funciones nuevas.
+- Evaluación automática con un modelo como juez, salvo que todo lo anterior esté cerrado.
 
-**Listo cuando:** la medición muestra que con retrieval la calidad es igual o mejor y el test de aislamiento pasa contra Qdrant.
-
----
-
-## Iteración 7: Extractor de tareas
-
-**Objetivo:** convertir una reunión de Fathom en tareas sugeridas en Notion.
-
-**Implementar:**
-- Lectura de una reunión de Fathom.
-- Detección del cliente al que corresponde.
-- Destilado de la reunión con el modelo rápido (no se guarda cruda).
-- Extracción de tareas con salida estructurada.
-- Creación en Notion como "sugeridas".
-
-**No implementar todavía:**
-- Confirmación automática de tareas: siempre las aprueba una persona.
-- Asignación automática de responsables o fechas sin revisión.
-
-**Listo cuando:** una reunión de prueba genera tareas sugeridas en Notion, asociadas al cliente correcto.
+**Listo cuando:** el checklist de la sección 9 de la consigna está completo y el tag `v1.0-tfi` está subido.
 
 ---
 
-## Iteración 8: Agente Supervisor
+## Después del TFI
 
-**Objetivo:** ayudar al área de supervisión a controlar plazos, coherencia de marca y contenido sin subir.
+Nada de esto se construye antes del 8 de noviembre. El detalle de cada punto está en `CLAUDE.md`, secciones "Fuera del TFI" y "Postergado: generación de imágenes".
 
-**Implementar:**
-- Registro de qué se publicó y qué está planificado.
-- Chequeos de plazos y de contenido sin subir.
-- Chequeo de coherencia de marca sobre contenido ya escrito.
-- LangGraph para los puntos donde una persona aprueba o rechaza.
-
-**No implementar todavía:**
-- Acciones automáticas sobre el contenido: el supervisor avisa, no corrige solo.
-
-**Listo cuando:** el área de supervisión recibe un reporte útil de un cliente real y puede aprobar o rechazar lo que el agente marca.
-
----
-
-## Postergado: generación de imágenes
-
-No tiene iteración asignada. Se retoma cuando la tecnología esté madura para el uso de la agencia. Lo ya investigado está en `CLAUDE.md`, sección "Postergado: generación de imágenes".
+- Datos reales de clientes en Supabase, con permisos por empleado.
+- Retrieval con Qdrant, solo si el material de un cliente deja de entrar en el contexto.
+- Extractor de tareas (Fathom a Notion).
+- Agente Supervisor.
+- Generación de imágenes.
