@@ -7,7 +7,8 @@ prompts y le pide al modelo una lista de ideas con forma validada.
 import logging
 from typing import get_args
 
-from yourebrand.core.llm import LLMOutputError, complete_structured, new_run_id
+from yourebrand.core.errors import LLMOutputError
+from yourebrand.core.llm import complete_structured, new_run_id
 from yourebrand.core.tenancy import TenantContext
 from yourebrand.creative.context import load_client_context
 from yourebrand.creative.prompts import build_idea_prompt, build_system_prompt

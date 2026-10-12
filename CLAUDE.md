@@ -67,7 +67,7 @@ Recorrido de la demo: entrada del usuario, decisión del agente, uso de tools, r
 
 ```
 src/yourebrand/
-  core/         infraestructura común (config, tenancy, llm, providers)
+  core/         infraestructura común (config, tenancy, llm, providers, errors, reliability)
   creative/     Agente Creativo: grafo, tools, skills, prompts, schemas
   api/          FastAPI: routers que llaman al agente
   supervisor/   fuera del TFI
@@ -86,6 +86,11 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 - La configuración se lee siempre con `get_settings()` (`core/config.py`, pydantic-settings). Nunca `os.environ` ni `.env` directo en otros módulos.
 - Las claves van como `SecretStr`. No imprimirlas ni loguearlas. Nunca credenciales reales en git: la consigna lo penaliza.
 - Las llamadas a modelos pasan por `core/llm.py`. Los SDKs de proveedores solo se importan en `core/providers.py`, detrás del contrato `LLMProvider`; el proveedor se elige con `LLM_PROVIDER`. Los nombres de modelo vienen de variables de entorno (`MODEL_GENERATION`, `MODEL_FAST`), no se hardcodean.
+- No se da por hecho nada que un SDK haga por su cuenta. El contrato `LLMProvider` dice qué garantiza cada proveedor y `core/` se hace cargo del resto:
+  - Los proveedores lanzan solo errores de `core/errors.py`; ningún otro módulo captura excepciones de un SDK.
+  - Los reintentos viven en `core/reliability.py` (`call_with_retry`) y los aplica `core/llm.py`. Los reintentos propios de cada SDK se apagan.
+  - El timeout es parte del contrato (`timeout_seconds`). Se configura con `LLM_TIMEOUT_SECONDS` y `LLM_MAX_RETRIES`.
+- Todo texto libre que escribe un usuario pasa por `validate_user_text` (`core/reliability.py`) antes de llegar a un modelo. Valida la forma, no frena una inyección de prompt: eso lo resuelven el `client_id` fuera del alcance del modelo y la aprobación humana.
 - Cada tool valida sus entradas y salidas con Pydantic. Un error de una tool vuelve al modelo como resultado de la tool, para que pueda corregir o avisar; no corta la conversación.
 - Toda ejecución lleva `run_id` y registra qué tools se llamaron, tokens y latencia. Es la evidencia de trazabilidad que pide la consigna.
 - Datos reales de clientes: nunca en `data/` ni en git.
@@ -95,7 +100,7 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 
 Hecho:
 
-- `core/`: `config.py`, `tenancy.py`, `providers.py`, `llm.py` (`complete` y `complete_structured`), con tests.
+- `core/`: `config.py`, `tenancy.py`, `providers.py`, `llm.py` (`complete` y `complete_structured`), `errors.py` y `reliability.py` (validación de texto, reintentos), con tests.
 - `creative/`: `context.py`, `prompts.py`, `schemas.py` e `ideas.py` (`generate_ideas` como pipeline fijo), con tests.
 - Cliente ficticio `data/tambor/` con `brand.md` y `posts.md`.
 

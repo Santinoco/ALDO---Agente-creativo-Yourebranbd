@@ -13,7 +13,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from yourebrand.core.config import get_settings
+
+# Los errores de salida se definen en core/errors.py; se importan acá también
+# para quienes ya los usan desde este módulo.
+from yourebrand.core.errors import (  # noqa: F401
+    InvalidOutputError,
+    LLMError,
+    LLMOutputError,
+    RefusedOutputError,
+    TruncatedOutputError,
+)
 from yourebrand.core.providers import ProviderResult, get_provider
+from yourebrand.core.reliability import RetryEvent, call_with_retry
 from yourebrand.core.tenancy import TenantContext
 
 logger = logging.getLogger(__name__)
@@ -33,6 +44,7 @@ class LLMResponse:
     latency_ms: float
     stop_reason: str | None
     run_id: str
+    attempts: int  # 1 si no hubo reintentos
 
 
 @dataclass(frozen=True)
@@ -41,22 +53,6 @@ class StructuredResponse[T: BaseModel]:
 
     data: T
     response: LLMResponse
-
-
-class LLMOutputError(RuntimeError):
-    """La llamada terminó pero su salida no se puede usar."""
-
-
-class TruncatedOutputError(LLMOutputError):
-    """La respuesta se cortó por llegar a max_tokens."""
-
-
-class RefusedOutputError(LLMOutputError):
-    """El modelo se negó a responder."""
-
-
-class InvalidOutputError(LLMOutputError):
-    """La respuesta no cumple el schema pedido."""
 
 
 def new_run_id() -> str:
@@ -79,19 +75,46 @@ def _call(
     max_tokens: int,
     output_schema: dict[str, Any] | None = None,
 ) -> tuple[LLMResponse, ProviderResult]:
-    """Llama al proveedor configurado, mide la llamada y registra su uso."""
+    """Llama al proveedor configurado, reintenta fallas temporales, mide y registra el uso."""
+    settings = get_settings()
     provider = get_provider()
     request: dict[str, Any] = {
         "model": _model_for(tier),
         "system": system,
         "prompt": prompt,
         "max_tokens": max_tokens,
+        "timeout_seconds": settings.llm_timeout_seconds,
     }
     if output_schema is not None:
         request["output_schema"] = output_schema
 
+    def log_retry(event: RetryEvent) -> None:
+        logger.warning(
+            "llm_retry run_id=%s client_id=%s attempt=%d error=%s delay_s=%.2f",
+            run_id,
+            tenant.client_id,
+            event.attempt,
+            event.error_type,
+            event.delay_seconds,
+        )
+
+    # La latencia es la que esperó quien llamó: incluye reintentos y esperas.
     started = time.perf_counter()
-    result = provider.generate(**request)
+    try:
+        result, attempts = call_with_retry(
+            lambda: provider.generate(**request),
+            max_retries=settings.llm_max_retries,
+            on_retry=log_retry,
+        )
+    except LLMError as exc:
+        logger.error(
+            "llm_call_failed run_id=%s client_id=%s provider=%s error=%s",
+            run_id,
+            tenant.client_id,
+            provider.name,
+            type(exc).__name__,
+        )
+        raise
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
 
     response = LLMResponse(
@@ -103,12 +126,13 @@ def _call(
         latency_ms=latency_ms,
         stop_reason=result.stop_reason,
         run_id=run_id,
+        attempts=attempts,
     )
 
     # Se registran tokens y metadatos, nunca el prompt ni la respuesta (datos del cliente).
     logger.info(
         "llm_call run_id=%s client_id=%s provider=%s model=%s "
-        "input_tokens=%d output_tokens=%d latency_ms=%.2f stop_reason=%s",
+        "input_tokens=%d output_tokens=%d latency_ms=%.2f stop_reason=%s attempts=%d",
         run_id,
         tenant.client_id,
         response.provider,
@@ -117,6 +141,7 @@ def _call(
         response.output_tokens,
         response.latency_ms,
         response.stop_reason,
+        response.attempts,
     )
     if result.truncated:
         logger.warning("llm_call run_id=%s respuesta cortada por max_tokens=%d", run_id, max_tokens)

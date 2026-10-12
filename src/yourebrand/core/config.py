@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # config.py -> core -> yourebrand -> src -> raíz del repo
@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr
     model_generation: str
     model_fast: str
+
+    # Confiabilidad de las llamadas al modelo, igual para cualquier proveedor.
+    llm_timeout_seconds: float = Field(default=120, gt=0)  # por intento
+    llm_max_retries: int = Field(default=2, ge=0, le=5)
 
     # Opcionales hasta que se construya el componente que los usa.
     qdrant_url: str | None = None

@@ -1,11 +1,13 @@
 import logging
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from yourebrand.core import llm
+from yourebrand.core import errors, llm
 from yourebrand.core.providers import ProviderResult
+from yourebrand.core.reliability import call_with_retry
 from yourebrand.core.tenancy import TenantContext
 
 TENANT = TenantContext("acme")
@@ -21,9 +23,12 @@ class StubProvider:
         self.text = "hola mundo"
         self.truncated = False
         self.refused = False
+        self.errors = []  # errores a lanzar, uno por llamada, antes de responder bien
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
+        if self.errors:
+            raise self.errors.pop(0)
         return ProviderResult(
             text=self.text,
             model=kwargs["model"],
@@ -43,8 +48,12 @@ def provider(monkeypatch):
     monkeypatch.setattr(
         llm,
         "get_settings",
-        lambda: SimpleNamespace(model_generation="model-gen", model_fast="model-fast"),
+        lambda: SimpleNamespace(
+            model_generation="model-gen", model_fast="model-fast", llm_timeout_seconds=30, llm_max_retries=2
+        ),
     )
+    # Los reintentos no esperan de verdad.
+    monkeypatch.setattr(llm, "call_with_retry", partial(call_with_retry, sleep=lambda seconds: None))
     return stub
 
 
@@ -67,6 +76,7 @@ def test_complete_passes_request_to_provider(provider):
         "system": "sos un asistente",
         "prompt": "hola",
         "max_tokens": 300,
+        "timeout_seconds": 30,
     }
 
 
@@ -104,6 +114,60 @@ def test_new_run_id_is_unique():
     assert llm.new_run_id() != llm.new_run_id()
 
 
+def test_single_attempt_when_nothing_fails(provider, caplog):
+    with caplog.at_level(logging.INFO, logger=llm.__name__):
+        response = llm.complete(system="s", prompt="p", tenant=TENANT, run_id="run-1")
+
+    assert response.attempts == 1
+    assert "attempts=1" in caplog.text
+
+
+def test_retries_transient_errors_and_reports_attempts(provider, caplog):
+    provider.errors = [errors.TransientProviderError("caído"), errors.ProviderTimeoutError("lento")]
+
+    with caplog.at_level(logging.INFO, logger=llm.__name__):
+        response = llm.complete(system="s", prompt="p", tenant=TENANT, run_id="run-1")
+
+    assert response.text == "hola mundo"
+    assert response.attempts == 3
+    assert len(provider.calls) == 3
+    assert "llm_retry run_id=run-1 client_id=acme attempt=1 error=TransientProviderError" in caplog.text
+    assert "llm_retry run_id=run-1 client_id=acme attempt=2 error=ProviderTimeoutError" in caplog.text
+    assert "attempts=3" in caplog.text
+
+
+def test_fails_when_retries_are_exhausted(provider, caplog):
+    provider.errors = [errors.TransientProviderError("caído")] * 3
+
+    with caplog.at_level(logging.ERROR, logger=llm.__name__), pytest.raises(errors.TransientProviderError):
+        llm.complete(system="s", prompt="p", tenant=TENANT, run_id="run-1")
+
+    # 1 intento + llm_max_retries=2 reintentos.
+    assert len(provider.calls) == 3
+    assert "llm_call_failed run_id=run-1 client_id=acme provider=stub error=TransientProviderError" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "error", [errors.InvalidRequestError("mal armado"), errors.ProviderConfigurationError("clave inválida")]
+)
+def test_non_transient_errors_are_not_retried(provider, error):
+    provider.errors = [error]
+
+    with pytest.raises(type(error)):
+        llm.complete(system="s", prompt="p", tenant=TENANT, run_id="run-1")
+
+    assert len(provider.calls) == 1
+
+
+def test_retry_logs_do_not_carry_the_error_message(provider, caplog):
+    provider.errors = [errors.TransientProviderError("dato confidencial")] * 3
+
+    with caplog.at_level(logging.INFO, logger=llm.__name__), pytest.raises(errors.TransientProviderError):
+        llm.complete(system="s", prompt="p", tenant=TENANT, run_id="run-1")
+
+    assert "dato confidencial" not in caplog.text
+
+
 class Note(BaseModel):
     """Schema mínimo para probar la salida estructurada."""
 
@@ -139,6 +203,7 @@ def test_structured_sends_standard_json_schema_to_provider(provider):
         "system": "sos un asistente",
         "prompt": "hola",
         "max_tokens": 300,
+        "timeout_seconds": 30,
         "output_schema": Note.model_json_schema(),
     }
 
@@ -185,3 +250,13 @@ def test_structured_error_names_fields_without_content(provider):
 def test_output_errors_share_a_base_class():
     for error in (llm.RefusedOutputError, llm.TruncatedOutputError, llm.InvalidOutputError):
         assert issubclass(error, llm.LLMOutputError)
+    assert issubclass(llm.LLMOutputError, errors.LLMError)
+
+
+def test_output_errors_are_not_retried(provider):
+    provider.refused = True
+
+    with pytest.raises(llm.RefusedOutputError):
+        complete_note()
+
+    assert len(provider.calls) == 1

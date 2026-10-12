@@ -63,7 +63,9 @@ def provider(tmp_path, monkeypatch):
     monkeypatch.setattr(
         llm,
         "get_settings",
-        lambda: SimpleNamespace(model_generation="model-gen", model_fast="model-fast"),
+        lambda: SimpleNamespace(
+            model_generation="model-gen", model_fast="model-fast", llm_timeout_seconds=30, llm_max_retries=2
+        ),
     )
     return stub
 

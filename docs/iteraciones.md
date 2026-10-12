@@ -43,7 +43,14 @@ Si aparece una idea que no está en la iteración actual, se anota en la iteraci
 - `creative/ideas.py`: `generate_ideas(tenant, content_type, count)` como secuencia fija.
 - Tests con el proveedor simulado.
 
-**Quedó pendiente:** confirmar una llamada real a Claude con el `.env` y una forma de ejecutarlo desde la terminal. Las dos cosas se resuelven al empezar la iteración 2.
+**Agregado antes de la iteración 2 (capa de confiabilidad):**
+- `core/errors.py`: errores propios de la capa de modelos. Cada proveedor traduce los de su SDK.
+- `core/reliability.py`: `validate_user_text` para texto libre de usuarios y `call_with_retry` con backoff.
+- `core/providers.py`: el contrato exige `timeout_seconds`, un solo intento y errores propios. Reintentos del SDK apagados.
+- `core/llm.py`: reintenta fallas temporales y registra cada reintento y la cantidad de intentos.
+- `LLM_TIMEOUT_SECONDS` y `LLM_MAX_RETRIES` en la configuración.
+
+**Quedó pendiente:** confirmar una llamada real a Claude con el `.env` y una forma de ejecutarlo desde la terminal. Las dos cosas se resuelven al empezar la iteración 2. Con la llamada real, ajustar `LLM_TIMEOUT_SECONDS` según lo que tarde una lista de 20 ideas.
 
 ---
 
@@ -65,6 +72,8 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
   - `refine_idea`: ajusta una idea ya generada según un comentario.
 - Las tools leen el `client_id` del estado; no lo reciben como argumento.
 - Manejo de errores: si una tool falla, el error vuelve al modelo como resultado de la tool.
+- Tope de pasos por turno, para que el loop de tools no pueda girar indefinidamente.
+- El mensaje del usuario y el comentario de `refine_idea` pasan por `validate_user_text`.
 - Skills `ugc-ideation` y `design-ideation`, armadas a partir de las guías de `creative/prompts.py`.
 - Chat desde la terminal, que registre qué tool se eligió en cada turno.
 - Tests de cada tool, del nodo que las ejecuta (incluido el caso de error) y del grafo con el proveedor simulado.
