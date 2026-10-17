@@ -28,10 +28,11 @@ class Idea(BaseModel):
         description="Pilar de contenido de la marca al que responde la idea, tal como figura en su información."
     )
     description: NonEmptyStr = Field(
-        description="Qué se ve y qué pasa en la pieza, con el detalle suficiente para que alguien pueda producirla."
+        description="Qué se ve y qué pasa en la pieza, en dos o tres oraciones. Sin pasos de producción."
     )
     rationale: NonEmptyStr = Field(
-        description="Por qué la idea encaja con esta marca en particular: qué rasgo, público u objetivo suyo aprovecha."
+        description="Por qué la idea encaja con esta marca en particular, en una oración: "
+        "qué rasgo, público u objetivo suyo aprovecha."
     )
 
 
