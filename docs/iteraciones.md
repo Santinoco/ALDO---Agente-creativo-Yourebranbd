@@ -6,11 +6,13 @@ Cada iteración termina con algo que funciona y se puede mostrar. No se empieza 
 
 Si aparece una idea que no está en la iteración actual, se anota en la iteración donde corresponde y se sigue con lo que toca. Si no entra en ninguna, va a "Después del TFI".
 
+El set de evaluación (`evals/`) se crea en la iteración 2 y crece en cada iteración, como pidió el profesor en su devolución (resumida en `CLAUDE.md`). Mide cuatro criterios: respeta el estilo de cada marca, evita repetir ideas, usa bien las tools (incluido preguntar cuando el pedido no está claro) y pide aprobación antes de guardar.
+
 | # | Iteración | Fecha objetivo | Requisitos del TFI que cierra | Estado |
 |---|---|---|---|---|
 | 0 | Base común (`core/`) | | | Hecha |
 | 1 | Creativo mínimo: ideas desde archivos | | | Hecha |
-| 2 | Agente con tools | 18/10 | Capacidad agéntica, skill | **Siguiente** |
+| 2 | Agente con tools | 18/10 | Capacidad agéntica, skill, evaluación inicial | **Siguiente** |
 | 3 | Estado, HITL y Notion | 25/10 | Estado y memoria, human-in-the-loop, integración externa | Pendiente |
 | 4 | Interfaz y reproducibilidad | 1/11 | Interfaz accesible, ejecución reproducible | Pendiente |
 | 5 | Evaluación y entrega | 8/11 | Evidencia de calidad, README, demo | Pendiente |
@@ -70,11 +72,15 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
   - `get_previous_posts`: posts anteriores, si hay.
   - `generate_ideas`: usa por dentro el `generate_ideas` de la iteración 1.
   - `refine_idea`: ajusta una idea ya generada según un comentario.
+  - `check_similarity`: compara una o varias ideas contra los posts anteriores y devuelve cuáles se parecen demasiado, a qué post y por qué. Usa el modelo rápido (`MODEL_FAST`) con los posts enteros en el contexto, sin embeddings.
 - Las tools leen el `client_id` del estado; no lo reciben como argumento.
+- Pedido de aclaraciones: si al pedido le falta algo para generar (por ejemplo, el tipo de contenido), el agente pregunta en vez de suponer. No es una tool: es el camino en el que el modelo termina el turno sin llamar a ninguna.
 - Manejo de errores: si una tool falla, el error vuelve al modelo como resultado de la tool.
 - Tope de pasos por turno, para que el loop de tools no pueda girar indefinidamente.
 - El mensaje del usuario y el comentario de `refine_idea` pasan por `validate_user_text`.
-- Skills `ugc-ideation` y `design-ideation`, armadas a partir de las guías de `creative/prompts.py`.
+- Skills `ugc-ideation` y `design-ideation`, armadas a partir de las guías de `creative/prompts.py`. Incluyen cuándo pedir aclaraciones y cuándo verificar similitud antes de proponer.
+- Set de evaluación inicial en `evals/`: pedidos fijos sobre `tambor`, cada uno con lo que se espera del agente (qué tool elige o si pregunta). Incluye pedidos claros, pedidos ambiguos (se espera que pregunte) y pedidos que llevan a ideas ya publicadas (se espera `check_similarity`).
+- Script que corre el set contra el modelo real y guarda en `artifacts/` las salidas, la tool elegida contra la esperada, los pasos, los tokens y la latencia de cada caso.
 - Chat desde la terminal, que registre qué tool se eligió en cada turno.
 - Tests de cada tool, del nodo que las ejecuta (incluido el caso de error) y del grafo con el proveedor simulado.
 
@@ -84,7 +90,7 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 - FastAPI.
 - Qdrant, Supabase, un segundo agente.
 
-**Listo cuando:** desde la terminal, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y el registro muestra que el modelo eligió tools distintas en cada turno.
+**Listo cuando:** desde la terminal, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y el registro muestra que el modelo eligió tools distintas en cada turno. Además, un pedido ambiguo hace que el agente pregunte sin generar, una idea parecida a un post de `tambor` queda marcada, y el set de evaluación corre y deja sus resultados en `artifacts/`.
 
 ---
 
@@ -99,7 +105,9 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
   - aprobar: se guardan como están;
   - modificar: se guardan con los cambios;
   - rechazar: no se guarda nada y el agente sigue la conversación.
+- `check_similarity` también compara contra las ideas ya guardadas en Notion. Es una lectura, así que no requiere aprobación.
 - Segundo cliente ficticio, de un rubro bien distinto a `tambor`.
+- Casos nuevos en el set de evaluación: pedidos para el segundo cliente (respeta su estilo y no mezcla marcas) y pedidos de guardar (se espera la pausa antes de escribir).
 - Test de aislamiento: lo generado para el cliente A no contiene información del cliente B, y un `client_id` inexistente o inválido falla.
 - Test del recorrido principal completo, con Notion simulado: pedido, tools, pausa, aprobación, guardado.
 - El chat de terminal pasa a soportar la pausa y a retomar una sesión existente.
@@ -127,8 +135,7 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 - Pantalla mínima: elegir cliente, conversar, ver las ideas y resolver la aprobación.
 - `Dockerfile` y `docker-compose.yml`.
 - `.env.example` completo y sin secretos.
-- Set de evaluación en `evals/`: pedidos fijos por cliente, cada uno con la tool que se espera que el agente elija.
-- Script que corre el set y guarda las salidas en `artifacts/`.
+- Casos nuevos en el set de evaluación para lo que falte cubrir del recorrido de la demo.
 - Prueba de instalación desde cero: clonar en otra carpeta y seguir los pasos escritos.
 
 **No implementar todavía:**
@@ -150,7 +157,7 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 A partir de acá no se agregan funciones: solo se corrige lo que la evaluación muestre.
 
 **Implementar:**
-- Correr el set de evaluación y guardar los resultados en `artifacts/` con sus métricas: éxito de la tarea, tool elegida contra tool esperada, cantidad de pasos, latencia, costo y errores.
+- Correr el set de evaluación completo y guardar los resultados en `artifacts/` con sus métricas: éxito de la tarea, tool elegida contra tool esperada, cantidad de pasos, latencia, costo y errores, agrupadas según los cuatro criterios (estilo de la marca, ideas no repetidas, uso de tools, aprobación antes de guardar).
 - Rúbrica simple para puntuar a mano la calidad de las ideas (encaja con la marca, es original, es realizable) y la puntuación obtenida.
 - Corrección de los problemas que aparezcan, volviendo a medir después de cada cambio.
 - `README.md` con las 13 secciones de la consigna: nombre, integrantes, problema, usuario, descripción, arquitectura, decisiones técnicas, instalación, configuración, ejecución, uso, evaluación y limitaciones.
