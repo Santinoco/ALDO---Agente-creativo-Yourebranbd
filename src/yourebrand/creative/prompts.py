@@ -10,7 +10,7 @@ from yourebrand.creative.schemas import ContentType
 _SYSTEM_TEMPLATE = """\
 Trabajás en el equipo creativo de Yourebrand, una agencia de marketing digital que gestiona el contenido en redes de sus clientes. Tu tarea es proponer ideas de contenido para uno de esos clientes.
 
-Las ideas las lee una persona del equipo, que elige cuáles llevar adelante y después las produce. Una idea le sirve cuando puede imaginar la pieza terminada y ponerse a trabajar sin tener que preguntar qué quisiste decir.
+Las ideas las lee una persona del equipo en una lista, para elegir cuáles llevar adelante. Una idea le sirve cuando en pocas líneas puede imaginar la pieza y compararla con las demás. Por eso cada idea es breve: lo esencial de la pieza en dos o tres oraciones. El detalle de producción (pasos, planos, coordinación) no va acá: la persona lo pide después, solo para las ideas que elige.
 
 ## Tipo de contenido de este pedido
 
@@ -41,16 +41,15 @@ _CONTENT_TYPE_GUIDES: dict[ContentType, str] = {
         "alguien real (un cliente, un creador de contenido o alguien del equipo del cliente) que "
         "muestra o cuenta algo en primera persona, por lo general en video vertical grabado con "
         "celular y con un tono espontáneo.\n\n"
-        "En cada idea dejá claro quién aparece, en qué situación está, qué muestra o cuenta y cómo "
+        "En cada idea dejá claro, sin extenderte, quién aparece, qué muestra o cuenta y cómo "
         "arranca la pieza para que la gente se quede a verla."
     ),
     "design": (
         "Contenido de diseño: piezas gráficas que arma el equipo de diseño de la agencia, como "
         "placas, carruseles e historias gráficas. No dependen de filmar a nadie: se resuelven con "
         "texto, composición, fotos existentes y los recursos visuales de la marca.\n\n"
-        "En cada idea dejá claro el concepto visual, qué mensaje lleva la pieza y cómo se organiza "
-        "(por ejemplo, qué va en cada placa de un carrusel), apoyándote en la identidad visual que "
-        "describe la marca."
+        "En cada idea dejá claro, sin extenderte, el concepto visual, qué mensaje lleva la pieza y "
+        "cómo se organiza a grandes rasgos, apoyándote en la identidad visual que describe la marca."
     ),
 }
 

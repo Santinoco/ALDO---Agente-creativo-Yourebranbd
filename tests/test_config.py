@@ -57,6 +57,17 @@ def test_secrets_are_not_printed(clean_env):
     assert "sk-test-123" not in repr(load())
 
 
+def test_validation_error_does_not_show_secrets(clean_env):
+    # Falta MODEL_GENERATION: el error no puede traer los valores que sí llegaron.
+    clean_env.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+
+    with pytest.raises(ValidationError) as error:
+        load()
+
+    assert "sk-test-123" not in str(error.value)
+    assert "model_generation" in str(error.value)
+
+
 def test_invalid_app_env_fails(clean_env):
     for name, value in REQUIRED.items():
         clean_env.setenv(name, value)
