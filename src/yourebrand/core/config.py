@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # config.py -> core -> yourebrand -> src -> raíz del repo
@@ -24,9 +24,11 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     data_dir: Path = PROJECT_ROOT / "data"
 
-    # LLM: obligatorios, sin ellos no funciona ningún componente.
-    llm_provider: Literal["anthropic"] = "anthropic"
-    anthropic_api_key: SecretStr
+    # LLM: sin ellos no funciona ningún componente. Solo es obligatoria la
+    # clave del proveedor elegido (ver _require_provider_key).
+    llm_provider: Literal["gemini", "anthropic"] = "gemini"
+    gemini_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
     model_generation: str
     model_fast: str
 
@@ -40,6 +42,22 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_key: SecretStr | None = None
     notion_api_key: SecretStr | None = None
+
+    @field_validator("gemini_api_key", "anthropic_api_key", mode="before")
+    @classmethod
+    def _empty_key_is_missing(cls, value: object) -> object:
+        """`CLAVE=` sin valor, como queda al copiar `.env.example`, cuenta como que falta."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _require_provider_key(self) -> Self:
+        """Falla al arrancar si falta la clave del proveedor elegido, no en la primera llamada."""
+        keys = {"gemini": self.gemini_api_key, "anthropic": self.anthropic_api_key}
+        if keys[self.llm_provider] is None:
+            raise ValueError(f"LLM_PROVIDER={self.llm_provider} requiere {self.llm_provider.upper()}_API_KEY")
+        return self
 
 
 @lru_cache

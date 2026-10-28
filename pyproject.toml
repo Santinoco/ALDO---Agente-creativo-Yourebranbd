@@ -5,6 +5,8 @@ description = "Sistema agéntico para Yourebrand (creativo, supervisor, extracto
 requires-python = ">=3.12"
 dependencies = [
     "anthropic",
+    "google-genai",
+    "httpx",
     "pydantic",
     "pydantic-settings",
     "fastapi",

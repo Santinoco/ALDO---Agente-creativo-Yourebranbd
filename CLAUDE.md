@@ -76,7 +76,8 @@ Aprobó el alcance: un único agente (el Creativo), el Supervisor para después 
 - **LangGraph para el grafo, la pausa y la persistencia** (`interrupt` y checkpointer). Se adelanta desde el Supervisor porque el motivo que lo justificaba, human-in-the-loop, ahora es un requisito.
 - **LangGraph sin los modelos de chat de LangChain**: los nodos son funciones propias que llaman a `core/llm.py`. Se mantiene el contrato `LLMProvider` y el registro de tokens, latencia y `run_id`. El costo es escribir a mano el nodo que ejecuta las tools en vez de usar los prearmados (`create_react_agent`, `ToolNode`).
 - **Persistencia en SQLite** para el TFI: sin servicios que levantar, así otra persona puede reproducir el proyecto. Supabase queda para después.
-- **Stack**: Python 3.12, FastAPI, LangGraph con checkpointer SQLite, API de Claude (Sonnet para generación, Haiku para tareas de volumen), Notion API.
+- **Stack**: Python 3.12, FastAPI, LangGraph con checkpointer SQLite, Notion API y, como modelo, la API de Gemini (un Flash para generación y un Flash-Lite para tareas de volumen; los nombres van en `.env`).
+- **Gemini como proveedor por costos** (octubre 2026). Claude queda implementado detrás del mismo contrato y se puede volver a usar cambiando `LLM_PROVIDER`; solo se exige la clave del proveedor elegido. El plan gratuito de Gemini usa el contenido para mejorar los productos de Google: sirve con los clientes ficticios de `data/`, nunca con datos reales.
 - **Nada se escribe en un sistema externo sin aprobación humana.**
 - **Un solo paquete, un solo venv, un solo `pyproject.toml`.**
 
@@ -117,7 +118,8 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 
 Hecho:
 
-- `core/`: `config.py`, `tenancy.py`, `providers.py`, `llm.py` (`complete` y `complete_structured`), `errors.py` y `reliability.py` (validación de texto, reintentos), con tests.
+- `core/`: `config.py`, `tenancy.py`, `providers.py` (`GeminiProvider` y `AnthropicProvider`), `llm.py` (`complete` y `complete_structured`), `errors.py` y `reliability.py` (validación de texto, reintentos), con tests.
+- `creative/cli.py`: pedido de ideas desde la terminal con una llamada real al modelo.
 - `creative/`: `context.py`, `prompts.py`, `schemas.py` e `ideas.py` (`generate_ideas` como pipeline fijo), con tests.
 - Cliente ficticio `data/tambor/` con `brand.md` y `posts.md`.
 
@@ -144,7 +146,7 @@ No construir nada de esto antes del 8 de noviembre. Se retoma después de la ent
 - **Supabase y datos reales de clientes**: datos relacionales y permisos por empleado.
 - **Evaluación automática con un modelo como juez**, salvo que sobre tiempo en la iteración 5.
 
-`core/db.py` y `core/vectorstore.py` existen vacíos para estos componentes; no se tocan durante el TFI.
+`core/db.py` existe vacío para estos componentes; no se toca durante el TFI.
 
 ## Postergado: generación de imágenes
 
