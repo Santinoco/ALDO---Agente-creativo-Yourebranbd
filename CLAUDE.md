@@ -103,7 +103,7 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 
 - La configuración se lee siempre con `get_settings()` (`core/config.py`, pydantic-settings). Nunca `os.environ` ni `.env` directo en otros módulos.
 - Las claves van como `SecretStr`. No imprimirlas ni loguearlas. Nunca credenciales reales en git: la consigna lo penaliza.
-- Las llamadas a modelos pasan por `core/llm.py`. Los SDKs de proveedores solo se importan en `core/providers.py`, detrás del contrato `LLMProvider`; el proveedor se elige con `LLM_PROVIDER`. Los nombres de modelo vienen de variables de entorno (`MODEL_GENERATION`, `MODEL_FAST`), no se hardcodean.
+- Las llamadas a modelos pasan por `core/llm.py`. Los SDKs de proveedores solo se importan en `core/providers/`, un módulo por proveedor con su propia traducción de errores, detrás del contrato `LLMProvider` (`providers/base.py`); el proveedor se elige con `LLM_PROVIDER`. Los nombres de modelo vienen de variables de entorno (`MODEL_GENERATION`, `MODEL_FAST`), no se hardcodean.
 - No se da por hecho nada que un SDK haga por su cuenta. El contrato `LLMProvider` dice qué garantiza cada proveedor y `core/` se hace cargo del resto:
   - Los proveedores lanzan solo errores de `core/errors.py`; ningún otro módulo captura excepciones de un SDK.
   - Los reintentos viven en `core/reliability.py` (`call_with_retry`) y los aplica `core/llm.py`. Los reintentos propios de cada SDK se apagan.
@@ -118,7 +118,7 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 
 Hecho:
 
-- `core/`: `config.py`, `tenancy.py`, `providers.py` (`GeminiProvider` y `AnthropicProvider`), `llm.py` (`complete` y `complete_structured`), `errors.py` y `reliability.py` (validación de texto, reintentos), con tests.
+- `core/`: `config.py`, `tenancy.py`, `providers/` (contrato en `base.py`, un módulo por proveedor: Gemini y Anthropic), `llm.py` (`complete` y `complete_structured`), `errors.py` y `reliability.py` (validación de texto, reintentos, plazo por reloj), con tests.
 - `creative/cli.py`: pedido de ideas desde la terminal con una llamada real al modelo.
 - `creative/`: `context.py`, `prompts.py`, `schemas.py` e `ideas.py` (`generate_ideas` como pipeline fijo), con tests.
 - Cliente ficticio `data/tambor/` con `brand.md` y `posts.md`.

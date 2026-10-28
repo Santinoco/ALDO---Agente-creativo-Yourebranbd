@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from yourebrand.core.errors import (
@@ -6,7 +8,12 @@ from yourebrand.core.errors import (
     RateLimitError,
     TransientProviderError,
 )
-from yourebrand.core.reliability import InvalidUserInputError, call_with_retry, validate_user_text
+from yourebrand.core.reliability import (
+    InvalidUserInputError,
+    call_with_deadline,
+    call_with_retry,
+    validate_user_text,
+)
 
 
 def test_valid_text_is_returned_trimmed():
@@ -178,3 +185,22 @@ def test_reports_each_retry():
         (1, "RateLimitError", 3),
         (2, "TransientProviderError", 2.0),
     ]
+
+
+def test_deadline_cuts_a_call_that_does_not_finish():
+    started = time.perf_counter()
+
+    with pytest.raises(ProviderTimeoutError, match="gemini"):
+        call_with_deadline(lambda: time.sleep(5), 0.2, label="gemini")
+
+    assert time.perf_counter() - started < 2
+
+
+def test_deadline_returns_value_and_reraises_errors_in_caller():
+    assert call_with_deadline(lambda: "ok", 1, label="x") == "ok"
+
+    def fail():
+        raise ValueError("adentro del hilo")
+
+    with pytest.raises(ValueError, match="adentro del hilo"):
+        call_with_deadline(fail, 1, label="x")

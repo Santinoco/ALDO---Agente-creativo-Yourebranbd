@@ -1,31 +1,13 @@
-"""Proveedores de LLM: único módulo que importa SDKs de proveedores.
-
-Para sumar un proveedor: crear una clase que cumpla `LLMProvider`,
-agregarla en `build_provider` y sumar su nombre a `llm_provider` en config.
-"""
+"""Adaptador para la API de Gemini: único módulo que importa el SDK de Google."""
 
 import re
-import threading
-from collections.abc import Callable
-from dataclasses import dataclass
-from functools import lru_cache
-from typing import Any, Protocol
+from typing import Any
 
 import httpx
-from anthropic import (
-    Anthropic,
-    APIConnectionError,
-    APIError,
-    APIStatusError,
-    APITimeoutError,
-    transform_schema,
-)
 from google.genai import Client as GeminiClient
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from pydantic import SecretStr
 
-from yourebrand.core.config import Settings, get_settings
 from yourebrand.core.errors import (
     InvalidRequestError,
     LLMError,
@@ -34,127 +16,8 @@ from yourebrand.core.errors import (
     RateLimitError,
     TransientProviderError,
 )
-
-
-@dataclass(frozen=True)
-class ProviderResult:
-    """Respuesta normalizada: igual para todos los proveedores."""
-
-    text: str
-    model: str
-    input_tokens: int
-    output_tokens: int
-    stop_reason: str | None
-    truncated: bool  # la respuesta se cortó por llegar a max_tokens
-    refused: bool = False  # el modelo se negó a responder
-
-
-class LLMProvider(Protocol):
-    """Contrato que cumple todo proveedor de generación de texto."""
-
-    name: str
-
-    def generate(
-        self,
-        *,
-        model: str,
-        system: str,
-        prompt: str,
-        max_tokens: int,
-        timeout_seconds: float,
-        output_schema: dict[str, Any] | None = None,
-    ) -> ProviderResult:
-        """Genera texto. Con `output_schema` (JSON Schema estándar), el texto es un JSON con esa forma.
-
-        Cómo se consigue esa forma es asunto de cada proveedor. Quien llama
-        valida igual el resultado: el contrato no garantiza que el JSON cumpla.
-
-        Todo proveedor debe:
-        - cortar la llamada al pasar `timeout_seconds`;
-        - hacer un solo intento: los reintentos son de `core/llm.py`;
-        - lanzar solo errores de `core/errors.py`, nunca los de su SDK.
-        """
-        ...
-
-
-def _retry_after_seconds(exc: APIStatusError) -> float | None:
-    try:
-        return float(exc.response.headers.get("retry-after"))
-    except (TypeError, ValueError):
-        return None
-
-
-def _translate_anthropic_error(exc: APIError) -> LLMError:
-    """Convierte una excepción del SDK de Anthropic en un error de `core/errors.py`."""
-    # El mensaje lleva solo el tipo y el código. El detalle queda en la excepción
-    # original, encadenada como causa.
-    detail = type(exc).__name__
-    # APITimeoutError hereda de APIConnectionError: se pregunta primero.
-    if isinstance(exc, APITimeoutError):
-        return ProviderTimeoutError(f"anthropic: la llamada superó el tiempo máximo ({detail})")
-    if isinstance(exc, APIConnectionError):
-        return TransientProviderError(f"anthropic: no se pudo conectar ({detail})")
-    if isinstance(exc, APIStatusError):
-        status = exc.status_code
-        detail = f"{detail}, HTTP {status}"
-        if status == 429:
-            return RateLimitError(
-                f"anthropic: límite de uso ({detail})", retry_after_seconds=_retry_after_seconds(exc)
-            )
-        if status in (401, 403, 404):
-            return ProviderConfigurationError(f"anthropic: clave, permiso o modelo inválido ({detail})")
-        if status == 408 or status >= 500:
-            return TransientProviderError(f"anthropic: falla temporal ({detail})")
-        return InvalidRequestError(f"anthropic: pedido rechazado ({detail})")
-    return LLMError(f"anthropic: error inesperado ({detail})")
-
-
-class AnthropicProvider:
-    """Adaptador para la API de Claude."""
-
-    name = "anthropic"
-
-    def __init__(self, api_key: str) -> None:
-        # max_retries=0: el SDK reintenta por su cuenta y eso se sumaría a los
-        # reintentos de core/llm.py, que son los que quedan registrados.
-        self._client = Anthropic(api_key=api_key, max_retries=0)
-
-    def generate(
-        self,
-        *,
-        model: str,
-        system: str,
-        prompt: str,
-        max_tokens: int,
-        timeout_seconds: float,
-        output_schema: dict[str, Any] | None = None,
-    ) -> ProviderResult:
-        request: dict[str, Any] = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "system": system,
-            "messages": [{"role": "user", "content": prompt}],
-            "timeout": timeout_seconds,
-        }
-        if output_schema is not None:
-            # transform_schema adapta el JSON Schema a lo que admite la API de Claude
-            # (por ejemplo, quita largos mínimos). Es un detalle de este proveedor.
-            request["output_config"] = {
-                "format": {"type": "json_schema", "schema": transform_schema(output_schema)}
-            }
-        try:
-            message = self._client.messages.create(**request)
-        except APIError as exc:
-            raise _translate_anthropic_error(exc) from exc
-        return ProviderResult(
-            text="".join(block.text for block in message.content if block.type == "text"),
-            model=message.model,
-            input_tokens=message.usage.input_tokens,
-            output_tokens=message.usage.output_tokens,
-            stop_reason=message.stop_reason,
-            truncated=message.stop_reason == "max_tokens",
-            refused=message.stop_reason == "refusal",
-        )
+from yourebrand.core.providers.base import ProviderResult
+from yourebrand.core.reliability import call_with_deadline
 
 
 def _transport_errors(name: str) -> tuple[type[Exception], ...]:
@@ -189,33 +52,6 @@ _GEMINI_REFUSAL_REASONS = {
     genai_types.FinishReason.PROHIBITED_CONTENT,
     genai_types.FinishReason.SPII,
 }
-
-
-def _call_with_deadline[T](fn: Callable[[], T], timeout_seconds: float) -> T:
-    """Corre `fn` y lanza ProviderTimeoutError si no termina en `timeout_seconds` de reloj.
-
-    El timeout del SDK de Google no alcanza: en httpx el de lectura es el tiempo
-    entre dos datos recibidos, no la duración total, y en una prueba real una
-    llamada con 120 s de timeout terminó a los 410 s. Si se vence el plazo, el
-    hilo sigue hasta que Google responda (y esa llamada se cobra), pero quien
-    llamó queda libre. Es daemon para no frenar la salida del proceso.
-    """
-    outcome: dict[str, Any] = {}
-
-    def run() -> None:
-        try:
-            outcome["value"] = fn()
-        except BaseException as exc:  # se relanza en el hilo de quien llamó
-            outcome["error"] = exc
-
-    worker = threading.Thread(target=run, name="gemini-call", daemon=True)
-    worker.start()
-    worker.join(timeout_seconds)
-    if worker.is_alive():
-        raise ProviderTimeoutError(f"gemini: la llamada superó el tiempo máximo ({timeout_seconds} s)")
-    if "error" in outcome:
-        raise outcome["error"]
-    return outcome["value"]
 
 
 def _gemini_error_details(exc: genai_errors.APIError) -> list[dict[str, Any]]:
@@ -303,9 +139,11 @@ class GeminiProvider:
             config.response_mime_type = "application/json"
             config.response_json_schema = output_schema
         try:
-            response = _call_with_deadline(
+            # El timeout del SDK no corta la duración total (ver call_with_deadline).
+            response = call_with_deadline(
                 lambda: self._client.models.generate_content(model=model, contents=prompt, config=config),
                 timeout_seconds,
+                label="gemini",
             )
         except genai_errors.APIError as exc:
             raise _translate_gemini_error(exc) from exc
@@ -345,26 +183,3 @@ def _normalize_gemini_response(
         truncated=finish == genai_types.FinishReason.MAX_TOKENS,
         refused=blocked is not None or finish in _GEMINI_REFUSAL_REASONS,
     )
-
-
-def _require_key(key: SecretStr | None, variable: str) -> str:
-    # config.py ya lo valida; esto cubre una Settings armada a mano.
-    if key is None:
-        raise ProviderConfigurationError(f"falta {variable} para el proveedor elegido")
-    return key.get_secret_value()
-
-
-def build_provider(settings: Settings) -> LLMProvider:
-    """Construye el proveedor elegido en la configuración (LLM_PROVIDER)."""
-    match settings.llm_provider:
-        case "anthropic":
-            return AnthropicProvider(_require_key(settings.anthropic_api_key, "ANTHROPIC_API_KEY"))
-        case "gemini":
-            return GeminiProvider(_require_key(settings.gemini_api_key, "GEMINI_API_KEY"))
-    raise ProviderConfigurationError(f"proveedor desconocido: {settings.llm_provider}")
-
-
-@lru_cache
-def get_provider() -> LLMProvider:
-    """Devuelve el proveedor configurado, creado una sola vez por proceso."""
-    return build_provider(get_settings())

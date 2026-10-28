@@ -1,7 +1,7 @@
 """Única puerta a los modelos de lenguaje para el resto del sistema.
 
 Acá vive lo común a cualquier proveedor (elegir modelo, medir, registrar uso).
-Lo específico de cada proveedor vive en `core/providers.py`.
+Lo específico de cada proveedor vive en `core/providers/`.
 """
 
 import logging

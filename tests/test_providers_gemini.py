@@ -1,4 +1,3 @@
-import time
 from types import SimpleNamespace
 
 import httpx
@@ -7,7 +6,8 @@ from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from pydantic import SecretStr
 
-from yourebrand.core import errors, providers
+from yourebrand.core import errors
+from yourebrand.core.providers import gemini_provider
 from yourebrand.core.providers import GeminiProvider, build_provider
 
 
@@ -60,7 +60,7 @@ class FakeGeminiClient:
 
 @pytest.fixture(autouse=True)
 def fake_sdk(monkeypatch):
-    monkeypatch.setattr(providers, "GeminiClient", FakeGeminiClient)
+    monkeypatch.setattr(gemini_provider, "GeminiClient", FakeGeminiClient)
 
 
 def generate(provider, **kwargs):
@@ -101,34 +101,15 @@ def test_gemini_rejects_timeout_below_api_minimum():
     assert provider._client.calls == []
 
 
-def test_deadline_cuts_a_call_that_does_not_finish():
-    # El timeout del SDK no corta la duración total: el plazo lo pone core.
-    started = time.perf_counter()
-
-    with pytest.raises(errors.ProviderTimeoutError):
-        providers._call_with_deadline(lambda: time.sleep(5), 0.2)
-
-    assert time.perf_counter() - started < 2
-
-
-def test_deadline_returns_value_and_reraises_errors_in_caller():
-    assert providers._call_with_deadline(lambda: "ok", 1) == "ok"
-
-    def fail():
-        raise ValueError("adentro del hilo")
-
-    with pytest.raises(ValueError, match="adentro del hilo"):
-        providers._call_with_deadline(fail, 1)
-
-
 def test_gemini_call_runs_under_the_requested_deadline(monkeypatch):
+    # El timeout del SDK no corta la duración total: el plazo lo pone core.
     seen = {}
 
-    def fake_deadline(fn, timeout_seconds):
+    def fake_deadline(fn, timeout_seconds, *, label):
         seen["timeout"] = timeout_seconds
         return fn()
 
-    monkeypatch.setattr(providers, "_call_with_deadline", fake_deadline)
+    monkeypatch.setattr(gemini_provider, "call_with_deadline", fake_deadline)
 
     generate(GeminiProvider("gm-test"))
 

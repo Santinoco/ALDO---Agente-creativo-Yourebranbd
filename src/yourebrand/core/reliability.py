@@ -1,4 +1,4 @@
-"""Confiabilidad común a todo el sistema: validar texto de usuarios y reintentar fallas temporales.
+"""Confiabilidad común a todo el sistema: validar texto de usuarios, reintentar fallas temporales y cortar llamadas por plazo.
 
 No depende de ningún proveedor. Los reintentos viven acá y no en los SDKs para
 que el comportamiento sea el mismo con cualquier proveedor.
@@ -6,11 +6,13 @@ que el comportamiento sea el mismo con cualquier proveedor.
 
 import random
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
-from yourebrand.core.errors import RateLimitError, TransientProviderError
+from yourebrand.core.errors import ProviderTimeoutError, RateLimitError, TransientProviderError
 
 MAX_USER_TEXT_CHARS = 4000
 
@@ -89,3 +91,30 @@ def call_with_retry[T](
                 on_retry(RetryEvent(attempt=attempt, error_type=type(exc).__name__, delay_seconds=delay))
             sleep(delay)
             attempt += 1
+
+
+def call_with_deadline[T](fn: Callable[[], T], timeout_seconds: float, *, label: str) -> T:
+    """Corre `fn` y lanza ProviderTimeoutError si no termina en `timeout_seconds` de reloj.
+
+    Sirve cuando el timeout de un SDK no corta la duración total: en httpx, por
+    ejemplo, el de lectura es el tiempo entre dos datos recibidos. Si se vence
+    el plazo, el hilo sigue hasta que el proveedor responda (y esa llamada se
+    cobra), pero quien llamó queda libre. Es daemon para no frenar la salida
+    del proceso. `label` identifica al proveedor en el mensaje de error.
+    """
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = fn()
+        except BaseException as exc:  # se relanza en el hilo de quien llamó
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, name=f"{label}-call", daemon=True)
+    worker.start()
+    worker.join(timeout_seconds)
+    if worker.is_alive():
+        raise ProviderTimeoutError(f"{label}: la llamada superó el tiempo máximo ({timeout_seconds} s)")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]

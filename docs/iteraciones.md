@@ -64,7 +64,7 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 
 **Implementar:**
 - Una llamada real a Claude con el `.env`, antes que nada.
-- Soporte de tools en `core/providers.py` y `core/llm.py`: mandar las definiciones de las tools, recibir los pedidos de uso del modelo y devolverle los resultados. Mantiene el registro de tokens, latencia y `run_id`.
+- Soporte de tools en `core/providers/` y `core/llm.py`: mandar las definiciones de las tools, recibir los pedidos de uso del modelo y devolverle los resultados. Mantiene el registro de tokens, latencia y `run_id`.
 - Estado del grafo: mensajes de la conversación, `client_id` de la sesión, ideas generadas y `run_id`.
 - Grafo de LangGraph con dos nodos propios: el que llama al modelo y el que ejecuta las tools. Sin los prearmados (`create_react_agent`, `ToolNode`).
 - Tools, cada una con entradas y salidas validadas con Pydantic:

@@ -5,7 +5,8 @@ import httpx2
 import pytest
 from pydantic import SecretStr
 
-from yourebrand.core import errors, providers
+from yourebrand.core import errors
+from yourebrand.core.providers import anthropic_provider
 from yourebrand.core.providers import AnthropicProvider, build_provider
 
 
@@ -35,7 +36,7 @@ class FakeAnthropic:
 
 @pytest.fixture
 def fake_sdk(monkeypatch):
-    monkeypatch.setattr(providers, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(anthropic_provider, "Anthropic", FakeAnthropic)
     monkeypatch.setattr(FakeAnthropic, "stop_reason", "end_turn")
     return FakeAnthropic
 
