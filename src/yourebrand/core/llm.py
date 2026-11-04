@@ -7,6 +7,7 @@ Lo específico de cada proveedor vive en `core/providers/`.
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -23,7 +24,7 @@ from yourebrand.core.errors import (  # noqa: F401
     RefusedOutputError,
     TruncatedOutputError,
 )
-from yourebrand.core.providers import ProviderResult, get_provider
+from yourebrand.core.providers import Message, ProviderResult, get_provider
 from yourebrand.core.reliability import RetryEvent, call_with_retry
 from yourebrand.core.tenancy import TenantContext
 
@@ -55,6 +56,24 @@ class StructuredResponse[T: BaseModel]:
     response: LLMResponse
 
 
+@dataclass(frozen=True)
+class TurnResponse:
+    """Un turno del agente: el mensaje del modelo más los datos de uso de la llamada."""
+
+    message: Message  # texto, pedidos de tools o ambos; listo para guardar en el historial
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+    stop_reason: str | None
+    run_id: str
+    attempts: int
+    # El modelo intentó pedir una tool pero el pedido llegó mal armado: quien
+    # llama decide si le da otra oportunidad.
+    malformed_tool_call: bool = False
+
+
 def new_run_id() -> str:
     """Identificador único para agrupar todas las llamadas de una misma ejecución."""
     return uuid.uuid4().hex
@@ -63,6 +82,42 @@ def new_run_id() -> str:
 def _model_for(tier: Tier) -> str:
     settings = get_settings()
     return settings.model_generation if tier == "generation" else settings.model_fast
+
+
+def _with_retries[T](
+    call: Callable[[], T], *, tenant: TenantContext, run_id: str, provider_name: str
+) -> tuple[T, int, float]:
+    """Corre una llamada al proveedor con reintentos. Devuelve resultado, intentos y latencia en ms.
+
+    Es lo común a `generate` y `generate_turn`: reintentar, medir y registrar
+    los reintentos y las fallas.
+    """
+    settings = get_settings()
+
+    def log_retry(event: RetryEvent) -> None:
+        logger.warning(
+            "llm_retry run_id=%s client_id=%s attempt=%d error=%s delay_s=%.2f",
+            run_id,
+            tenant.client_id,
+            event.attempt,
+            event.error_type,
+            event.delay_seconds,
+        )
+
+    # La latencia es la que esperó quien llamó: incluye reintentos y esperas.
+    started = time.perf_counter()
+    try:
+        result, attempts = call_with_retry(call, max_retries=settings.llm_max_retries, on_retry=log_retry)
+    except LLMError as exc:
+        logger.error(
+            "llm_call_failed run_id=%s client_id=%s provider=%s error=%s",
+            run_id,
+            tenant.client_id,
+            provider_name,
+            type(exc).__name__,
+        )
+        raise
+    return result, attempts, round((time.perf_counter() - started) * 1000, 2)
 
 
 def _call(
@@ -88,34 +143,9 @@ def _call(
     if output_schema is not None:
         request["output_schema"] = output_schema
 
-    def log_retry(event: RetryEvent) -> None:
-        logger.warning(
-            "llm_retry run_id=%s client_id=%s attempt=%d error=%s delay_s=%.2f",
-            run_id,
-            tenant.client_id,
-            event.attempt,
-            event.error_type,
-            event.delay_seconds,
-        )
-
-    # La latencia es la que esperó quien llamó: incluye reintentos y esperas.
-    started = time.perf_counter()
-    try:
-        result, attempts = call_with_retry(
-            lambda: provider.generate(**request),
-            max_retries=settings.llm_max_retries,
-            on_retry=log_retry,
-        )
-    except LLMError as exc:
-        logger.error(
-            "llm_call_failed run_id=%s client_id=%s provider=%s error=%s",
-            run_id,
-            tenant.client_id,
-            provider.name,
-            type(exc).__name__,
-        )
-        raise
-    latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    result, attempts, latency_ms = _with_retries(
+        lambda: provider.generate(**request), tenant=tenant, run_id=run_id, provider_name=provider.name
+    )
 
     response = LLMResponse(
         text=result.text,
@@ -207,3 +237,72 @@ def complete_structured[T: BaseModel](
         raise InvalidOutputError(f"run_id={run_id}: la salida no cumple el schema en {fields}") from None
 
     return StructuredResponse(data=data, response=response)
+
+
+def complete_turn(
+    *,
+    system: str,
+    messages: list[Message],
+    tools: list[dict[str, Any]],
+    tenant: TenantContext,
+    run_id: str,
+    tier: Tier = "generation",
+    max_tokens: int = 8000,
+) -> TurnResponse:
+    """Un turno de conversación con tools: el modelo responde con texto o pide tools.
+
+    Las tools no se ejecutan acá: el turno devuelve los pedidos y quien llama
+    (el grafo) los ejecuta con el registry y le devuelve los resultados.
+    """
+    settings = get_settings()
+    provider = get_provider()
+    result, attempts, latency_ms = _with_retries(
+        lambda: provider.generate_turn(
+            model=_model_for(tier),
+            system=system,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            timeout_seconds=settings.llm_timeout_seconds,
+        ),
+        tenant=tenant,
+        run_id=run_id,
+        provider_name=provider.name,
+    )
+
+    # Qué tools pidió el modelo en este turno: es la evidencia de que la
+    # selección es dinámica. Solo nombres, nunca argumentos (datos del cliente).
+    requested = ",".join(call.tool_name for call in result.message.tool_calls) or "-"
+    logger.info(
+        "llm_turn run_id=%s client_id=%s provider=%s model=%s input_tokens=%d output_tokens=%d "
+        "latency_ms=%.2f stop_reason=%s attempts=%d tools_requested=%s",
+        run_id,
+        tenant.client_id,
+        provider.name,
+        result.model,
+        result.input_tokens,
+        result.output_tokens,
+        latency_ms,
+        result.stop_reason,
+        attempts,
+        requested,
+    )
+
+    if result.refused:
+        raise RefusedOutputError(f"run_id={run_id}: el modelo se negó a responder")
+    if result.truncated:
+        raise TruncatedOutputError(f"run_id={run_id}: respuesta cortada por max_tokens={max_tokens}")
+    # Un pedido de tool mal armado no lanza: es recuperable y lo resuelve el grafo.
+
+    return TurnResponse(
+        message=result.message,
+        provider=provider.name,
+        model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        latency_ms=latency_ms,
+        stop_reason=result.stop_reason,
+        run_id=run_id,
+        attempts=attempts,
+        malformed_tool_call=result.malformed_tool_call,
+    )

@@ -13,14 +13,16 @@ from pydantic import SecretStr
 from yourebrand.core.config import Settings, get_settings
 from yourebrand.core.errors import ProviderConfigurationError
 from yourebrand.core.providers.anthropic_provider import AnthropicProvider
-from yourebrand.core.providers.base import LLMProvider, ProviderResult
+from yourebrand.core.providers.base import LLMProvider, Message, ProviderResult, TurnResult
 from yourebrand.core.providers.gemini_provider import GeminiProvider
 
 __all__ = [
     "AnthropicProvider",
     "GeminiProvider",
     "LLMProvider",
+    "Message",
     "ProviderResult",
+    "TurnResult",
     "build_provider",
     "get_provider",
 ]

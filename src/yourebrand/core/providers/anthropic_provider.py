@@ -19,7 +19,7 @@ from yourebrand.core.errors import (
     RateLimitError,
     TransientProviderError,
 )
-from yourebrand.core.providers.base import ProviderResult
+from yourebrand.core.providers.base import Message, ProviderResult, TurnResult
 
 
 def _retry_after_seconds(exc: APIStatusError) -> float | None:
@@ -100,3 +100,17 @@ class AnthropicProvider:
             truncated=message.stop_reason == "max_tokens",
             refused=message.stop_reason == "refusal",
         )
+
+    def generate_turn(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+        timeout_seconds: float,
+    ) -> TurnResult:
+        # El proveedor en uso es Gemini (ver CLAUDE.md). Cuando se vuelva a
+        # Claude, acá van la conversión de mensajes y de tools a su formato.
+        raise ProviderConfigurationError("anthropic: tools no soportadas todavía; usar LLM_PROVIDER=gemini")

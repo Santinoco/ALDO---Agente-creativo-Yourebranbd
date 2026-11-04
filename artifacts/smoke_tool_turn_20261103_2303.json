@@ -1,0 +1,18 @@
+{
+  "run_id": "485d5158237c4c189d0f9e5ce277ca81",
+  "model_turns": [
+    {
+      "tools_requested": [
+        "get_brand_info"
+      ],
+      "parts_with_signature": 1,
+      "output_tokens": 136
+    },
+    {
+      "tools_requested": [],
+      "output_tokens": 339,
+      "text": "Los pilares de contenido de **Tambor** son:\n\n1. **Cómo funciona:** El paso a paso para usar el local por primera vez (máquinas, pagos, tiempos).\n2. **Cuidado de la ropa:** Consejos, trucos y errores comunes (etiquetas, separación de prendas, lavado especial).\n3. **Los 90 minutos:** Propuestas de qué hacer en el local mientras esperás (estudiar, trabajar, descansar).\n4. **Lo que en casa no entra:** Contenido enfocado en lavar cargas grandes (acolchados, frazadas, cambio de estación).\n5. **La vida en el barrio:** Conexión con la cotidianidad de los clientes (estudiantes, primera vez viviendo solos, épocas de parciales)."
+    }
+  ],
+  "result": "ok"
+}

@@ -93,14 +93,16 @@ def call_with_retry[T](
             attempt += 1
 
 
-def call_with_deadline[T](fn: Callable[[], T], timeout_seconds: float, *, label: str) -> T:
-    """Corre `fn` y lanza ProviderTimeoutError si no termina en `timeout_seconds` de reloj.
+class DeadlineExceeded(TimeoutError):
+    """`run_with_deadline` dejó de esperar: la función no terminó a tiempo."""
 
-    Sirve cuando el timeout de un SDK no corta la duración total: en httpx, por
-    ejemplo, el de lectura es el tiempo entre dos datos recibidos. Si se vence
-    el plazo, el hilo sigue hasta que el proveedor responda (y esa llamada se
-    cobra), pero quien llamó queda libre. Es daemon para no frenar la salida
-    del proceso. `label` identifica al proveedor en el mensaje de error.
+
+def run_with_deadline[T](fn: Callable[[], T], timeout_seconds: float) -> T:
+    """Corre `fn` y lanza DeadlineExceeded si no termina en `timeout_seconds` de reloj.
+
+    Si se vence el plazo, el hilo sigue hasta que `fn` termine, pero quien
+    llamó queda libre. Es daemon para no frenar la salida del proceso: por eso
+    no se usa ThreadPoolExecutor, cuyos hilos el intérprete espera al cerrar.
     """
     outcome: dict[str, Any] = {}
 
@@ -110,11 +112,26 @@ def call_with_deadline[T](fn: Callable[[], T], timeout_seconds: float, *, label:
         except BaseException as exc:  # se relanza en el hilo de quien llamó
             outcome["error"] = exc
 
-    worker = threading.Thread(target=run, name=f"{label}-call", daemon=True)
+    worker = threading.Thread(target=run, daemon=True)
     worker.start()
     worker.join(timeout_seconds)
     if worker.is_alive():
-        raise ProviderTimeoutError(f"{label}: la llamada superó el tiempo máximo ({timeout_seconds} s)")
+        raise DeadlineExceeded(f"no terminó en {timeout_seconds} s")
     if "error" in outcome:
         raise outcome["error"]
     return outcome["value"]
+
+
+def call_with_deadline[T](fn: Callable[[], T], timeout_seconds: float, *, label: str) -> T:
+    """Como `run_with_deadline`, pero vencer el plazo es un ProviderTimeoutError.
+
+    Para llamadas a un proveedor cuyo timeout no corta la duración total (en
+    httpx, el de lectura es el tiempo entre dos datos recibidos). `label`
+    identifica al proveedor en el mensaje.
+    """
+    try:
+        return run_with_deadline(fn, timeout_seconds)
+    except DeadlineExceeded:
+        raise ProviderTimeoutError(
+            f"{label}: la llamada superó el tiempo máximo ({timeout_seconds} s)"
+        ) from None

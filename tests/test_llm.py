@@ -6,7 +6,8 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from yourebrand.core import errors, llm
-from yourebrand.core.providers import ProviderResult
+from yourebrand.core.providers import Message, ProviderResult, TurnResult
+from yourebrand.core.tools import ToolCall
 from yourebrand.core.reliability import call_with_retry
 from yourebrand.core.tenancy import TenantContext
 
@@ -260,3 +261,82 @@ def test_output_errors_are_not_retried(provider):
         complete_note()
 
     assert len(provider.calls) == 1
+
+
+class StubTurnProvider:
+    """Proveedor falso para turnos con tools."""
+
+    name = "stub"
+
+    def __init__(self):
+        self.calls = []
+        self.tool_calls = []
+        self.truncated = False
+        self.malformed = False
+
+    def generate_turn(self, **kwargs):
+        self.calls.append(kwargs)
+        return TurnResult(
+            message=Message(role="model", tool_calls=self.tool_calls),
+            model=kwargs["model"],
+            input_tokens=10,
+            output_tokens=5,
+            stop_reason="STOP",
+            truncated=self.truncated,
+            malformed_tool_call=self.malformed,
+        )
+
+
+@pytest.fixture
+def turn_provider(provider, monkeypatch):
+    # Reusa la configuración falsa de `provider` y cambia solo el proveedor.
+    stub = StubTurnProvider()
+    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    return stub
+
+
+def complete_turn(**kwargs):
+    return llm.complete_turn(
+        system="s", messages=[Message.user("hola")], tools=[], tenant=TENANT, run_id="run-1", **kwargs
+    )
+
+
+def test_complete_turn_passes_history_and_tools(turn_provider):
+    declarations = [{"name": "t", "description": "d", "parameters": {"type": "object", "properties": {}}}]
+
+    llm.complete_turn(system="s", messages=[Message.user("hola")], tools=declarations, tenant=TENANT, run_id="r")
+
+    sent = turn_provider.calls[0]
+    assert sent["model"] == "model-gen"
+    assert sent["tools"] == declarations
+    assert sent["messages"][0].text == "hola"
+    assert sent["timeout_seconds"] == 30
+
+
+def test_complete_turn_logs_requested_tools_without_arguments(turn_provider, caplog):
+    turn_provider.tool_calls = [
+        ToolCall(id="1", tool_name="get_brand_info"),
+        ToolCall(id="2", tool_name="generate_ideas", arguments={"brief": "dato del cliente"}),
+    ]
+
+    with caplog.at_level(logging.INFO, logger="yourebrand.core.llm"):
+        response = complete_turn()
+
+    assert [call.tool_name for call in response.message.tool_calls] == ["get_brand_info", "generate_ideas"]
+    assert "tools_requested=get_brand_info,generate_ideas" in caplog.text
+    assert "run_id=run-1" in caplog.text
+    assert "dato del cliente" not in caplog.text
+
+
+def test_complete_turn_truncated_raises(turn_provider):
+    turn_provider.truncated = True
+
+    with pytest.raises(errors.TruncatedOutputError):
+        complete_turn()
+
+
+def test_complete_turn_malformed_tool_call_does_not_raise(turn_provider):
+    # Es recuperable: el grafo decide qué hacer.
+    turn_provider.malformed = True
+
+    assert complete_turn().malformed_tool_call is True

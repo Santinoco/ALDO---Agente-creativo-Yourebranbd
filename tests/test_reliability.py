@@ -10,8 +10,10 @@ from yourebrand.core.errors import (
 )
 from yourebrand.core.reliability import (
     InvalidUserInputError,
+    DeadlineExceeded,
     call_with_deadline,
     call_with_retry,
+    run_with_deadline,
     validate_user_text,
 )
 
@@ -204,3 +206,10 @@ def test_deadline_returns_value_and_reraises_errors_in_caller():
 
     with pytest.raises(ValueError, match="adentro del hilo"):
         call_with_deadline(fail, 1, label="x")
+
+
+def test_run_with_deadline_raises_its_own_error():
+    # Error propio, no ProviderTimeoutError: el runtime de tools lo distingue
+    # del timeout de un modelo llamado desde adentro de la tool.
+    with pytest.raises(DeadlineExceeded):
+        run_with_deadline(lambda: time.sleep(5), 0.2)
