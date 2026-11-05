@@ -9,6 +9,7 @@ dependencies = [
     "httpx",
     "pydantic",
     "pydantic-settings",
+    "langgraph>=1.2,<2",
     "fastapi",
     "uvicorn",
     "qdrant-client",
