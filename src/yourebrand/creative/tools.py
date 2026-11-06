@@ -11,9 +11,9 @@ la tool correcta, así que dicen qué devuelve cada una y cuándo conviene usarl
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, create_model, field_validator
 
 from yourebrand.core.config import get_settings
 from yourebrand.core.errors import LLMError
@@ -23,6 +23,7 @@ from yourebrand.core.trace import emit
 from yourebrand.creative.context import MissingBrandError, load_brand, load_previous_posts
 from yourebrand.creative.ideas import MAX_IDEAS, NotEnoughIdeasError, generate_ideas_with_usage
 from yourebrand.creative.schemas import ContentType, GeneratedIdea
+from yourebrand.creative.skills import Skill, available_skills, get_skill
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,37 @@ def generate_ideas_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResu
     )
 
 
+def load_skill_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResult:
+    """Criterio completo de una skill. El nombre ya viene validado contra las skills que existen."""
+    skill = get_skill(args["name"])
+    emit(logger, "skill_loaded", run_id=ctx.run_id, client_id=ctx.tenant.client_id, skill=skill.name,
+         version=skill.version, status=skill.status, chars=len(skill.body))
+    # Entre etiquetas, como el material del cliente. Una skill en borrador lo
+    # dice, para que el modelo se lo aclare a la persona si lo usa.
+    draft_note = (
+        "Esta skill es un borrador: todavía no la validó el equipo de la agencia.\n\n"
+        if skill.status == "borrador" else ""
+    )
+    return ToolResult(
+        ok=True,
+        content=f'<skill nombre="{skill.name}">\n{draft_note}{skill.body}\n</skill>',
+        metadata={"skill": skill.name, "version": skill.version, "status": skill.status},
+    )
+
+
+def _load_skill_args_model(skills: list[Skill]) -> type[BaseModel]:
+    """Argumentos de load_skill, con los nombres posibles como enum.
+
+    Se arma con las skills que existen: el modelo ve la lista cerrada en el
+    schema y un nombre inventado falla en la validación, sin llegar al handler.
+    """
+    names = tuple(skill.name for skill in skills)
+    return create_model(
+        "LoadSkillArgs",
+        name=(Literal[names], Field(description="Nombre de la skill que querés cargar.")),
+    )
+
+
 def _generation_timeout_s() -> float:
     """Plazo de generate_ideas: el peor caso de la llamada al modelo con sus reintentos.
 
@@ -219,4 +251,19 @@ def build_creative_registry(*, generation_timeout_s: float | None = None) -> Too
             retries=0,
         )
     )
+    skills = list(available_skills().values())
+    if skills:
+        registry.register(
+            Tool(
+                name="load_skill",
+                description=(
+                    "Carga el criterio completo de una skill de la agencia: cómo se piensa o se hace un "
+                    "tipo de trabajo. Usala antes de una tarea que coincide con una skill del índice de tu "
+                    "prompt, si todavía no la cargaste en esta conversación."
+                ),
+                kind="read",
+                fn=load_skill_tool,
+                args_model=_load_skill_args_model(skills),
+            )
+        )
     return registry

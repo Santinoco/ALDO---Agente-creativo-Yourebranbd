@@ -99,7 +99,7 @@ def run_tool(name, client_id, arguments=None):
 def test_registry_exposes_creative_tools():
     declarations = {d["name"]: d for d in make_registry().function_declarations()}
 
-    assert list(declarations) == ["get_brand_info", "get_previous_posts", "generate_ideas"]
+    assert list(declarations) == ["get_brand_info", "get_previous_posts", "generate_ideas", "load_skill"]
     # Las de lectura no tienen argumentos: el cliente no es algo que el modelo pueda elegir.
     assert declarations["get_brand_info"]["parameters"] == {"type": "object", "properties": {}}
     assert declarations["get_previous_posts"]["parameters"] == {"type": "object", "properties": {}}

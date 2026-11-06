@@ -249,6 +249,9 @@ function describeEvent(e) {
     case "client_context":
       return ["📄", "Cargó el material del cliente",
         `marca: ${f.brand_chars} caracteres · posts: ${f.has_posts ? `${f.posts_chars} caracteres` : "no hay"}`];
+    case "skill_loaded":
+      return ["📘", `Cargó la skill ${code(f.skill)}`,
+        `versión ${escapeHtml(f.version)}${f.status === "borrador" ? " · borrador" : ""} · ${f.chars} caracteres`];
     case "ideas_added":
       return ["＋", `${f.count} idea(s) sumadas a la sesión`, f.ids.map(escapeHtml).join(", ")];
     case "step_limit":
