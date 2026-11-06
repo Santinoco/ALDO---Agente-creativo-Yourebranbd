@@ -36,6 +36,17 @@ class Idea(BaseModel):
     )
 
 
+class GeneratedIdea(Idea):
+    """Idea ya generada dentro de una sesión: suma lo que pone el sistema, no el modelo.
+
+    El id permite que el agente y la persona se refieran a una idea ("la idea-3f2a1c")
+    sin reescribirla, y que las tools siguientes (refinar, guardar) la encuentren.
+    """
+
+    id: NonEmptyStr
+    content_type: ContentType
+
+
 class IdeaList(BaseModel):
     """Respuesta completa del modelo a un pedido de ideas."""
 

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from yourebrand.core.reliability import DeadlineExceeded, run_with_deadline
 from yourebrand.core.tenancy import TenantContext
+from yourebrand.core.trace import emit, nested
 
 # Un logger por módulo: su nombre es "yourebrand.core.tools", así en los tests
 # o en la configuración de logs se puede filtrar solo lo de este archivo.
@@ -61,6 +62,19 @@ class ToolResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)  # lo que lee la aplicación
 
 
+# Convención para tools que llaman a un modelo por dentro (generar, refinar,
+# comparar): informan los tokens de esas llamadas en la metadata con estas
+# claves, y quien registra la traza los suma al turno. Sin esto, el costo de
+# esas llamadas no aparece en la traza, porque no pasan por el nodo del modelo.
+MODEL_INPUT_TOKENS_KEY = "model_input_tokens"
+MODEL_OUTPUT_TOKENS_KEY = "model_output_tokens"
+
+
+def model_usage_metadata(input_tokens: int, output_tokens: int) -> dict[str, int]:
+    """Metadata de uso de modelo de una tool, con las claves de la convención."""
+    return {MODEL_INPUT_TOKENS_KEY: input_tokens, MODEL_OUTPUT_TOKENS_KEY: output_tokens}
+
+
 class RetryableToolError(RuntimeError):
     """Falla transitoria de una tool: es la única que habilita reintentar."""
 
@@ -68,6 +82,12 @@ class RetryableToolError(RuntimeError):
 # Forma que tiene que tener un handler: recibe (args, contexto) y devuelve un
 # ToolResult. Es solo un alias para que las firmas se lean mejor.
 ToolHandler = Callable[[dict[str, Any], ExecutionContext], ToolResult]
+
+
+def _validation_summary(details: list[dict[str, Any]]) -> list[str]:
+    """Qué campo falló y por qué, sin el valor recibido (puede traer texto del cliente)."""
+    return [f"{'.'.join(str(part) for part in item.get('loc', ())) or '(argumentos)'}: {item.get('msg')}"
+            for item in details]
 
 
 class Tool:
@@ -191,19 +211,20 @@ class ToolRegistry:
         # por donde salga.
         result = self._run(call, context, allowed_kinds)
         # Trazabilidad: qué tool, para qué cliente y run, y cómo terminó.
-        # No se loguean argumentos ni contenido: pueden traer datos del cliente.
-        # Los %s se completan solo si el log se va a escribir, así no se arma
-        # el texto en vano.
-        logger.info(
-            "tool_call run_id=%s client_id=%s tool=%s ok=%s error_type=%s latency_ms=%.2f",
-            context.run_id,
-            context.tenant.client_id,
-            call.tool_name,
-            result.ok,
+        # Al log no van argumentos ni contenido: pueden traer datos del cliente.
+        # El mensaje de error va solo a la traza de la pantalla (private).
+        fields: dict[str, Any] = {
+            "run_id": context.run_id,
+            "client_id": context.tenant.client_id,
+            "tool": call.tool_name,
+            "ok": result.ok,
             # .get devuelve None si la tool salió bien y no hay error_type.
-            result.metadata.get("error_type"),
-            (perf_counter() - started) * 1000,  # segundos a milisegundos
-        )
+            "error_type": result.metadata.get("error_type"),
+            "latency_ms": (perf_counter() - started) * 1000,  # segundos a milisegundos
+        }
+        if "details" in result.metadata:
+            fields["invalid_fields"] = _validation_summary(result.metadata["details"])
+        emit(logger, "tool_call", private={} if result.ok else {"error_message": result.content}, **fields)
         return result
 
     def _run(
@@ -271,7 +292,10 @@ class ToolRegistry:
             try:
                 # run_with_deadline recibe una función sin argumentos. La lambda
                 # la arma: cuando se llame, ejecuta tool.fn(args, context).
-                raw = run_with_deadline(lambda: tool.fn(args, context), tool.timeout_s)
+                # nested(): lo que la tool emita por dentro (por ejemplo, su
+                # llamada al modelo) queda marcado como parte de este paso.
+                with nested():
+                    raw = run_with_deadline(lambda: tool.fn(args, context), tool.timeout_s)
             except DeadlineExceeded:
                 # Un timeout no se reintenta: el hilo anterior puede seguir
                 # corriendo, y otro intento lo duplicaría.

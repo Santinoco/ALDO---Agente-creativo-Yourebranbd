@@ -27,6 +27,7 @@ from yourebrand.core.errors import (  # noqa: F401
 from yourebrand.core.providers import Message, ProviderResult, get_provider
 from yourebrand.core.reliability import RetryEvent, call_with_retry
 from yourebrand.core.tenancy import TenantContext
+from yourebrand.core.trace import emit
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +96,18 @@ def _with_retries[T](
     settings = get_settings()
 
     def log_retry(event: RetryEvent) -> None:
-        logger.warning(
-            "llm_retry run_id=%s client_id=%s attempt=%d error=%s delay_s=%.2f",
-            run_id,
-            tenant.client_id,
-            event.attempt,
-            event.error_type,
-            event.delay_seconds,
+        emit(
+            logger,
+            "llm_retry",
+            level=logging.WARNING,
+            # El mensaje explica la falla en la pantalla, pero no va al log: no
+            # se puede garantizar que ningún proveedor meta contenido en él.
+            private={"message": event.message},
+            run_id=run_id,
+            client_id=tenant.client_id,
+            attempt=event.attempt,
+            error=event.error_type,
+            delay_s=event.delay_seconds,
         )
 
     # La latencia es la que esperó quien llamó: incluye reintentos y esperas.
@@ -109,12 +115,17 @@ def _with_retries[T](
     try:
         result, attempts = call_with_retry(call, max_retries=settings.llm_max_retries, on_retry=log_retry)
     except LLMError as exc:
-        logger.error(
-            "llm_call_failed run_id=%s client_id=%s provider=%s error=%s",
-            run_id,
-            tenant.client_id,
-            provider_name,
-            type(exc).__name__,
+        # El mensaje del error (proveedor, tipo, código HTTP) explica la falla
+        # en la pantalla; como en los reintentos, no va al log.
+        emit(
+            logger,
+            "llm_call_failed",
+            level=logging.ERROR,
+            private={"message": str(exc)},
+            run_id=run_id,
+            client_id=tenant.client_id,
+            provider=provider_name,
+            error=type(exc).__name__,
         )
         raise
     return result, attempts, round((time.perf_counter() - started) * 1000, 2)
@@ -160,18 +171,18 @@ def _call(
     )
 
     # Se registran tokens y metadatos, nunca el prompt ni la respuesta (datos del cliente).
-    logger.info(
-        "llm_call run_id=%s client_id=%s provider=%s model=%s "
-        "input_tokens=%d output_tokens=%d latency_ms=%.2f stop_reason=%s attempts=%d",
-        run_id,
-        tenant.client_id,
-        response.provider,
-        response.model,
-        response.input_tokens,
-        response.output_tokens,
-        response.latency_ms,
-        response.stop_reason,
-        response.attempts,
+    emit(
+        logger,
+        "llm_call",
+        run_id=run_id,
+        client_id=tenant.client_id,
+        provider=response.provider,
+        model=response.model,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        latency_ms=response.latency_ms,
+        stop_reason=response.stop_reason,
+        attempts=response.attempts,
     )
     if result.truncated:
         logger.warning("llm_call run_id=%s respuesta cortada por max_tokens=%d", run_id, max_tokens)
@@ -271,21 +282,27 @@ def complete_turn(
     )
 
     # Qué tools pidió el modelo en este turno: es la evidencia de que la
-    # selección es dinámica. Solo nombres, nunca argumentos (datos del cliente).
-    requested = ",".join(call.tool_name for call in result.message.tool_calls) or "-"
-    logger.info(
-        "llm_turn run_id=%s client_id=%s provider=%s model=%s input_tokens=%d output_tokens=%d "
-        "latency_ms=%.2f stop_reason=%s attempts=%d tools_requested=%s",
-        run_id,
-        tenant.client_id,
-        provider.name,
-        result.model,
-        result.input_tokens,
-        result.output_tokens,
-        latency_ms,
-        result.stop_reason,
-        attempts,
-        requested,
+    # selección es dinámica. Solo nombres; los argumentos van a la traza como
+    # dato privado (pueden traer texto del cliente) y nunca al log.
+    emit(
+        logger,
+        "llm_turn",
+        # Lista y no dict por nombre: el modelo puede pedir la misma tool dos veces.
+        private={
+            "tool_calls": [{"tool": call.tool_name, "arguments": call.arguments} for call in result.message.tool_calls]
+        },
+        run_id=run_id,
+        client_id=tenant.client_id,
+        provider=provider.name,
+        model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        latency_ms=latency_ms,
+        stop_reason=result.stop_reason,
+        attempts=attempts,
+        tools_requested=[call.tool_name for call in result.message.tool_calls],
+        replied_with_text=bool(result.message.text),
+        malformed_tool_call=result.malformed_tool_call,
     )
 
     if result.refused:

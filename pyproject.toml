@@ -26,5 +26,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# La pantalla de demo no es código Python: sin esto, una instalación que no sea
+# editable (por ejemplo en Docker) no la incluiría.
+[tool.setuptools.package-data]
+yourebrand = ["api/static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

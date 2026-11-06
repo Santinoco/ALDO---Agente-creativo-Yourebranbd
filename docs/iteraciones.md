@@ -81,16 +81,15 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 - Skills `ugc-ideation` y `design-ideation`, armadas a partir de las guías de `creative/prompts.py`. Incluyen cuándo pedir aclaraciones y cuándo verificar similitud antes de proponer.
 - Set de evaluación inicial en `evals/`: pedidos fijos sobre `tambor`, cada uno con lo que se espera del agente (qué tool elige o si pregunta). Incluye pedidos claros, pedidos ambiguos (se espera que pregunte) y pedidos que llevan a ideas ya publicadas (se espera `check_similarity`).
 - Script que corre el set contra el modelo real y guarda en `artifacts/` las salidas, la tool elegida contra la esperada, los pasos, los tokens y la latencia de cada caso.
-- Chat desde la terminal, que registre qué tool se eligió en cada turno.
+- Pantalla de demo (adelantada de la iteración 4, en lugar del chat de terminal): FastAPI con los endpoints de clientes, sesiones y mensajes, y una pantalla con el chat y, al costado, la traza de cada turno (llamadas al modelo, tools, tokens y tiempos). Se eligió una sola interfaz en vez de dos: la misma pantalla es la de la entrega y la de la demo.
 - Tests de cada tool, del nodo que las ejecuta (incluido el caso de error) y del grafo con el proveedor simulado.
 
 **No implementar todavía:**
 - Persistencia: la conversación vive mientras dura el proceso.
 - Notion y cualquier escritura en sistemas externos.
-- FastAPI.
 - Qdrant, Supabase, un segundo agente.
 
-**Listo cuando:** desde la terminal, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y el registro muestra que el modelo eligió tools distintas en cada turno. Además, un pedido ambiguo hace que el agente pregunte sin generar, una idea parecida a un post de `tambor` queda marcada, y el set de evaluación corre y deja sus resultados en `artifacts/`.
+**Listo cuando:** desde la pantalla, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y la traza muestra que el modelo eligió tools distintas en cada turno. Además, un pedido ambiguo hace que el agente pregunte sin generar, una idea parecida a un post de `tambor` queda marcada, y el set de evaluación corre y deja sus resultados en `artifacts/`.
 
 ---
 
@@ -110,15 +109,14 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 - Casos nuevos en el set de evaluación: pedidos para el segundo cliente (respeta su estilo y no mezcla marcas) y pedidos de guardar (se espera la pausa antes de escribir).
 - Test de aislamiento: lo generado para el cliente A no contiene información del cliente B, y un `client_id` inexistente o inválido falla.
 - Test del recorrido principal completo, con Notion simulado: pedido, tools, pausa, aprobación, guardado.
-- El chat de terminal pasa a soportar la pausa y a retomar una sesión existente.
+- La pantalla pasa a soportar la pausa (aprobar, modificar o rechazar) y a retomar una sesión existente: el endpoint para resolver la pausa se adelanta de la iteración 4.
 
 **No implementar todavía:**
-- FastAPI y la pantalla.
 - Memoria compartida entre sesiones o entre clientes.
 - Usuarios y permisos por empleado.
 - Supabase.
 
-**Listo cuando:** desde la terminal se generan ideas, se pide guardar dos, el agente se pausa, se cierra el proceso, se vuelve a abrir la misma sesión, se aprueba modificando una, y las dos aparecen en Notion. El test de aislamiento pasa.
+**Listo cuando:** desde la pantalla se generan ideas, se pide guardar dos, el agente se pausa, se cierra el proceso, se vuelve a abrir la misma sesión, se aprueba modificando una, y las dos aparecen en Notion. El test de aislamiento pasa.
 
 ---
 

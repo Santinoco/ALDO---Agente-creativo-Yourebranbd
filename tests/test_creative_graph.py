@@ -187,6 +187,16 @@ def test_step_limit_closes_pending_calls_and_replies(provider, registry):
     assert requested <= answered
 
 
+def test_step_limit_and_malformed_calls_appear_in_events(provider, registry):
+    provider.script = [malformed_turn(), tool_turn("echo"), tool_turn("echo")]
+    outcome = run_turn(build_graph(registry, max_steps=2), SESSION, "loop")
+
+    names = [e.event for e in outcome.events]
+    assert "malformed_tool_call" in names
+    [limit] = [e for e in outcome.events if e.event == "step_limit"]
+    assert limit.fields["not_executed"] == ["echo"]
+
+
 def test_steps_reset_on_each_turn(provider, registry):
     graph = build_graph(registry, max_steps=2)
     provider.script = [tool_turn("echo"), text_turn("uno")]
@@ -224,6 +234,10 @@ def test_model_error_gives_fixed_reply_and_session_keeps_working(provider, regis
 
     assert outcome.reply == agent_graph.MODEL_ERROR_REPLY
     assert outcome.trace[0].error_type == "InvalidRequestError"
+    # La traza explica la falla con el mensaje del error, que no va al log.
+    [model_error] = [e for e in outcome.events if e.event == "model_error"]
+    assert model_error.fields["error"] == "InvalidRequestError"
+    assert model_error.private["message"] == "pedido inválido"
 
     provider.script = [text_turn("ahora sí")]
     assert run_turn(graph, SESSION, "de nuevo").reply == "ahora sí"

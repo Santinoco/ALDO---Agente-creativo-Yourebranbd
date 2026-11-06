@@ -127,7 +127,7 @@ Lo ya escrito no se tira: `generate_ideas` pasa a ser el interior de una tool, `
 
 Plan hasta la entrega, en orden. El detalle de cada iteración (qué implementar, qué no y cuándo está lista) está en `docs/iteraciones.md`. Antes de implementar algo, verificar a qué iteración pertenece; no se empieza una sin cerrar la anterior.
 
-- **Iteración 2, SIGUIENTE: agente con tools (hasta el 18/10).** Soporte de tools en `core/`, grafo de LangGraph, tools de lectura, `generate_ideas`, `refine_idea` y `check_similarity`, pedido de aclaraciones, las dos skills, set de evaluación inicial en `evals/` con su script, chat desde la terminal.
+- **Iteración 2, SIGUIENTE: agente con tools (hasta el 18/10).** Soporte de tools en `core/`, grafo de LangGraph, tools de lectura, `generate_ideas`, `refine_idea` y `check_similarity`, pedido de aclaraciones, las dos skills, set de evaluación inicial en `evals/` con su script, pantalla de demo con traza (FastAPI, adelantada de la iteración 4 en lugar del chat de terminal).
 - **Iteración 3: estado, HITL y Notion (hasta el 25/10).** Checkpointer SQLite, `save_ideas_to_notion` con pausa y aprobación, `check_similarity` también contra las ideas guardadas en Notion, segundo cliente ficticio, test de aislamiento, casos nuevos en el set de evaluación.
 - **Iteración 4: interfaz y reproducibilidad (hasta el 1/11).** Endpoints de FastAPI, pantalla mínima, Docker Compose, casos del recorrido de la demo en el set de evaluación.
 - **Iteración 5: evaluación y entrega (hasta el 8/11).** Correr el set completo, resultados y métricas en `artifacts/`, `README.md` con las 13 secciones y el diagrama, video de respaldo, tag `v1.0-tfi`.

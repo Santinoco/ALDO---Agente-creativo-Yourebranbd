@@ -51,6 +51,20 @@ def test_idea_prompt_ends_with_the_request(content_type, count, expected):
     assert build_idea_prompt(ACME, content_type, count).endswith(expected)
 
 
+def test_idea_prompt_includes_brief_before_the_request():
+    prompt = build_idea_prompt(ACME, "ugc", 3, brief="día del padre")
+
+    assert "<foco_del_pedido>\ndía del padre\n</foco_del_pedido>" in prompt
+    assert prompt.index("<foco_del_pedido>") > prompt.index("</posts_anteriores>")
+    assert prompt.endswith(
+        "Proponé 3 ideas de contenido UGC para esta marca. Todas tienen que responder al foco del pedido."
+    )
+
+
+def test_idea_prompt_without_brief_has_no_brief_block():
+    assert "foco_del_pedido" not in build_idea_prompt(ACME, "ugc", 3)
+
+
 def test_idea_prompt_only_contains_its_own_client():
     prompt = build_idea_prompt(ACME, "ugc", 5)
 

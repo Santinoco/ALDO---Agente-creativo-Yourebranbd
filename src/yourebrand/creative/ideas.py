@@ -5,10 +5,11 @@ prompts y le pide al modelo una lista de ideas con forma validada.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import get_args
 
 from yourebrand.core.errors import LLMOutputError
-from yourebrand.core.llm import complete_structured, new_run_id
+from yourebrand.core.llm import LLMResponse, complete_structured, new_run_id
 from yourebrand.core.tenancy import TenantContext
 from yourebrand.creative.context import load_client_context
 from yourebrand.creative.prompts import build_idea_prompt, build_system_prompt
@@ -20,17 +21,37 @@ MAX_IDEAS = 20
 
 
 class NotEnoughIdeasError(LLMOutputError):
-    """El modelo devolvió menos ideas de las pedidas."""
+    """El modelo devolvió menos ideas de las pedidas.
+
+    Lleva el uso de la llamada: los tokens se gastaron igual y la traza los cuenta.
+    """
+
+    def __init__(self, message: str, *, usage: LLMResponse | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
-def generate_ideas(
+@dataclass(frozen=True)
+class IdeaGeneration:
+    """Ideas generadas más el uso de la llamada al modelo (tokens, latencia, modelo)."""
+
+    ideas: list[Idea]
+    usage: LLMResponse
+
+
+def generate_ideas_with_usage(
     tenant: TenantContext,
     content_type: ContentType,
     count: int,
     *,
+    brief: str | None = None,
     run_id: str | None = None,
-) -> list[Idea]:
-    """Devuelve `count` ideas de contenido del tipo pedido para el cliente."""
+) -> IdeaGeneration:
+    """Como `generate_ideas`, pero devuelve también el uso de la llamada.
+
+    Lo usa la tool del agente para que la traza del turno sume los tokens de
+    esta llamada, que no pasa por el nodo del modelo.
+    """
     # Se valida antes de leer datos o llamar al modelo: un pedido mal armado
     # no tiene que costar una llamada.
     if content_type not in get_args(ContentType):
@@ -43,7 +64,7 @@ def generate_ideas(
 
     result = complete_structured(
         system=build_system_prompt(content_type),
-        prompt=build_idea_prompt(context, content_type, count),
+        prompt=build_idea_prompt(context, content_type, count, brief),
         schema=IdeaList,
         tenant=tenant,
         run_id=run_id,
@@ -52,7 +73,24 @@ def generate_ideas(
 
     # La cantidad no se puede fijar en el schema, así que se controla acá.
     if len(ideas) < count:
-        raise NotEnoughIdeasError(f"run_id={run_id}: se pidieron {count} ideas y llegaron {len(ideas)}")
+        raise NotEnoughIdeasError(
+            f"run_id={run_id}: se pidieron {count} ideas y llegaron {len(ideas)}", usage=result.response
+        )
     if len(ideas) > count:
         logger.warning("generate_ideas run_id=%s llegaron %d ideas, se devuelven %d", run_id, len(ideas), count)
-    return ideas[:count]
+    return IdeaGeneration(ideas=ideas[:count], usage=result.response)
+
+
+def generate_ideas(
+    tenant: TenantContext,
+    content_type: ContentType,
+    count: int,
+    *,
+    brief: str | None = None,
+    run_id: str | None = None,
+) -> list[Idea]:
+    """Devuelve `count` ideas de contenido del tipo pedido para el cliente.
+
+    `brief` es el foco opcional del pedido; quien llama ya lo validó.
+    """
+    return generate_ideas_with_usage(tenant, content_type, count, brief=brief, run_id=run_id).ideas

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yourebrand.core.tenancy import TenantContext, client_data_dir
+from yourebrand.core.trace import emit
 
 logger = logging.getLogger(__name__)
 
@@ -37,23 +38,34 @@ def _read_text(path: Path) -> str | None:
     return path.read_text(encoding="utf-8").strip() or None
 
 
-def load_client_context(tenant: TenantContext) -> ClientContext:
-    """Lee la información de marca y los posts anteriores del cliente."""
+def load_brand(tenant: TenantContext) -> str:
+    """Información de marca del cliente. Falla si no está cargada: sin marca no se puede trabajar."""
     # La carpeta se resuelve siempre a partir del tenant validado: es lo que
     # impide leer material de otro cliente.
-    folder = client_data_dir(tenant)
-
-    brand = _read_text(folder / BRAND_FILENAME)
+    brand = _read_text(client_data_dir(tenant) / BRAND_FILENAME)
     if brand is None:
         raise MissingBrandError(f"el cliente {tenant.client_id!r} no tiene {BRAND_FILENAME}")
-    posts = _read_text(folder / POSTS_FILENAME)
+    return brand
+
+
+def load_previous_posts(tenant: TenantContext) -> str | None:
+    """Posts anteriores del cliente, o None si no hay: una marca nueva puede no tenerlos."""
+    return _read_text(client_data_dir(tenant) / POSTS_FILENAME)
+
+
+def load_client_context(tenant: TenantContext) -> ClientContext:
+    """Lee la información de marca y los posts anteriores del cliente."""
+    brand = load_brand(tenant)
+    posts = load_previous_posts(tenant)
 
     # Se registra el tamaño, nunca el contenido (datos del cliente). El tamaño es
     # la señal para saber cuándo el material deja de entrar entero en el prompt.
-    logger.info(
-        "client_context client_id=%s brand_chars=%d posts_chars=%d",
-        tenant.client_id,
-        len(brand),
-        len(posts or ""),
+    emit(
+        logger,
+        "client_context",
+        client_id=tenant.client_id,
+        brand_chars=len(brand),
+        posts_chars=len(posts or ""),
+        has_posts=posts is not None,
     )
     return ClientContext(client_id=tenant.client_id, brand=brand, posts=posts)

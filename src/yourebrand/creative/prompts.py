@@ -88,8 +88,14 @@ def build_system_prompt(content_type: ContentType) -> str:
     return _SYSTEM_TEMPLATE.format(content_type_guide=_CONTENT_TYPE_GUIDES[content_type])
 
 
-def build_idea_prompt(context: ClientContext, content_type: ContentType, count: int) -> str:
-    """Material del cliente seguido del pedido concreto."""
+def build_idea_prompt(
+    context: ClientContext, content_type: ContentType, count: int, brief: str | None = None
+) -> str:
+    """Material del cliente seguido del pedido concreto.
+
+    `brief` es el foco que pidió la persona del equipo (una fecha, un producto,
+    un objetivo). Sin él, las ideas cubren a la marca en general.
+    """
     # El material va primero y el pedido al final: con textos largos el modelo
     # responde mejor cuando la consigna queda después de lo que tiene que leer.
     blocks = [f"<marca>\n{context.brand}\n</marca>"]
@@ -97,5 +103,11 @@ def build_idea_prompt(context: ClientContext, content_type: ContentType, count: 
         blocks.append(f"<posts_anteriores>\n{context.posts}\n</posts_anteriores>")
 
     ideas = "1 idea" if count == 1 else f"{count} ideas"
-    blocks.append(f"Proponé {ideas} de {_CONTENT_TYPE_LABELS[content_type]} para esta marca.")
+    request = f"Proponé {ideas} de {_CONTENT_TYPE_LABELS[content_type]} para esta marca."
+    if brief is not None:
+        # Entre etiquetas, como el material: así queda claro dónde termina el
+        # foco y empieza la consigna, aunque el foco traiga varias líneas.
+        blocks.append(f"<foco_del_pedido>\n{brief}\n</foco_del_pedido>")
+        request += " Todas tienen que responder al foco del pedido."
+    blocks.append(request)
     return "\n\n".join(blocks)

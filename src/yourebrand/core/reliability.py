@@ -4,6 +4,7 @@ No depende de ningún proveedor. Los reintentos viven acá y no en los SDKs para
 que el comportamiento sea el mismo con cualquier proveedor.
 """
 
+import contextvars
 import random
 import re
 import threading
@@ -50,6 +51,9 @@ class RetryEvent:
     attempt: int
     error_type: str
     delay_seconds: float
+    # Mensaje del error, para explicarlo en la traza de la pantalla. No se
+    # loguea: no se puede garantizar que ningún proveedor meta contenido en él.
+    message: str = ""
 
 
 def call_with_retry[T](
@@ -88,7 +92,9 @@ def call_with_retry[T](
             delay = min(delay, max_delay_seconds)
 
             if on_retry is not None:
-                on_retry(RetryEvent(attempt=attempt, error_type=type(exc).__name__, delay_seconds=delay))
+                on_retry(
+                    RetryEvent(attempt=attempt, error_type=type(exc).__name__, delay_seconds=delay, message=str(exc))
+                )
             sleep(delay)
             attempt += 1
 
@@ -105,10 +111,13 @@ def run_with_deadline[T](fn: Callable[[], T], timeout_seconds: float) -> T:
     no se usa ThreadPoolExecutor, cuyos hilos el intérprete espera al cerrar.
     """
     outcome: dict[str, Any] = {}
+    # Un hilo nuevo arranca sin las variables de contexto de quien lo crea. Se
+    # copian para que lo que corre adentro siga emitiendo a la traza del turno.
+    context = contextvars.copy_context()
 
     def run() -> None:
         try:
-            outcome["value"] = fn()
+            outcome["value"] = context.run(fn)
         except BaseException as exc:  # se relanza en el hilo de quien llamó
             outcome["error"] = exc
 

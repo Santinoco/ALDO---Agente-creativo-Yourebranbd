@@ -16,10 +16,11 @@ del contexto que arma `run_tools`, nunca del modelo.
 import logging
 import operator
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
@@ -28,8 +29,18 @@ from yourebrand.core.errors import LLMError
 from yourebrand.core.providers import Message
 from yourebrand.core.reliability import validate_user_text
 from yourebrand.core.tenancy import TenantContext, client_data_dir
-from yourebrand.core.tools import ExecutionContext, ToolRegistry, ToolResult
+from yourebrand.core.tools import (
+    MODEL_INPUT_TOKENS_KEY,
+    MODEL_OUTPUT_TOKENS_KEY,
+    ExecutionContext,
+    ToolCall,
+    ToolRegistry,
+    ToolResult,
+)
+from yourebrand.core.trace import TraceEvent, collect, emit
 from yourebrand.creative.prompts import build_agent_system_prompt
+from yourebrand.creative.schemas import GeneratedIdea
+from yourebrand.creative.tools import IDEAS_METADATA_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +88,9 @@ class AgentState(TypedDict):
     messages: Annotated[list[Message], operator.add]
     steps: int  # llamadas al modelo en el turno actual; se reinicia en cada turno
     trace: Annotated[list[StepTrace], operator.add]
+    # Ideas generadas en la sesión, con su id. Las tools que vengan después
+    # (refinar, guardar en Notion) las buscan acá por id, sin que el modelo las reescriba.
+    ideas: Annotated[list[GeneratedIdea], operator.add]
 
 
 @dataclass(frozen=True)
@@ -94,15 +108,47 @@ class TurnOutcome:
     reply: str
     run_id: str
     trace: list[StepTrace]
+    ideas: list[GeneratedIdea]  # las generadas en este turno, para mostrarlas aparte del texto
+    # Todo lo que pasó en el turno, en orden: llamadas, reintentos, ruteo, tools,
+    # material cargado. `trace` es el resumen por paso; `events`, el detalle.
+    events: list[TraceEvent] = field(default_factory=list)
 
     @property
     def tools_called(self) -> list[str]:
         """Tools que se ejecutaron en el turno, en orden."""
         return [step.tool_name for step in self.trace if step.kind == "tool" and step.tool_name]
 
+    @property
+    def input_tokens(self) -> int:
+        """Tokens de entrada del turno: los del agente más los de las tools que llaman a un modelo."""
+        return sum(step.input_tokens for step in self.trace)
+
+    @property
+    def output_tokens(self) -> int:
+        """Tokens de salida del turno, con el mismo criterio que `input_tokens`."""
+        return sum(step.output_tokens for step in self.trace)
+
 
 class SessionClientMismatchError(ValueError):
     """La sesión ya pertenece a otro cliente."""
+
+
+# Clases propias que guarda el estado, incluidas las anidadas (un Message lleva
+# ToolCall y ToolResult). Al leer un checkpoint, LangGraph solo reconstruye las
+# que están en esta lista: si la base de checkpoints se adulterara, no podría
+# hacer que se construya cualquier otra clase de Python. Si el estado suma un
+# tipo nuevo, va acá; un test lo controla.
+CHECKPOINT_TYPES: tuple[type, ...] = (Message, ToolCall, ToolResult, StepTrace, GeneratedIdea)
+
+
+def checkpoint_serializer() -> JsonPlusSerializer:
+    """Serializador de checkpoints que solo acepta los tipos del estado.
+
+    Es el mismo para el checkpointer en memoria y para el de SQLite.
+    """
+    return JsonPlusSerializer(
+        allowed_msgpack_modules=[(cls.__module__, cls.__name__) for cls in CHECKPOINT_TYPES]
+    )
 
 
 def build_graph(
@@ -144,6 +190,10 @@ def build_graph(
                 # un texto fijo para que el historial quede consistente y la
                 # sesión siga usable en el próximo turno.
                 traces.append(StepTrace(run_id=run_id, kind="model", error_type=type(exc).__name__))
+                # El mensaje de core/errors.py dice proveedor, tipo y código
+                # HTTP: es lo que explica en la traza por qué falló.
+                emit(logger, "model_error", level=logging.ERROR, private={"message": str(exc)},
+                     run_id=run_id, client_id=tenant.client_id, error=type(exc).__name__)
                 message = Message(role="model", text=MODEL_ERROR_REPLY)
                 break
 
@@ -161,6 +211,8 @@ def build_graph(
             if not turn.malformed_tool_call:
                 message = turn.message
                 break
+            emit(logger, "malformed_tool_call", level=logging.WARNING, run_id=run_id,
+                 client_id=tenant.client_id, will_retry=len(traces) <= MALFORMED_RETRIES)
 
         if message is None:  # se agotaron los intentos con pedidos mal armados
             message = Message(role="model", text=MALFORMED_REPLY)
@@ -175,10 +227,25 @@ def build_graph(
 
         messages: list[Message] = []
         traces: list[StepTrace] = []
+        ideas: list[GeneratedIdea] = []
         for call in pending:
+            # Los argumentos que eligió el modelo son la decisión que muestra la
+            # traza; van como dato privado: a la pantalla sí, al log nunca.
+            emit(logger, "tool_start", private={"arguments": call.arguments}, run_id=context.run_id,
+                 client_id=context.tenant.client_id, tool=call.tool_name)
             # registry.run nunca lanza por un error esperable: lo devuelve como
             # ToolResult(ok=False) y vuelve al modelo como resultado de la tool.
             result = registry.run(call, context)
+            if result.ok and IDEAS_METADATA_KEY in result.metadata:
+                # Las ideas pasan al estado y salen de la metadata: el modelo ya
+                # las ve en el contenido, y guardarlas también en el historial
+                # las duplicaría en cada checkpoint.
+                metadata = dict(result.metadata)
+                new_ideas = [GeneratedIdea.model_validate(item) for item in metadata.pop(IDEAS_METADATA_KEY)]
+                ideas += new_ideas
+                result = result.model_copy(update={"metadata": metadata})
+                emit(logger, "ideas_added", run_id=context.run_id, client_id=context.tenant.client_id,
+                     count=len(new_ideas), ids=[idea.id for idea in new_ideas])
             messages.append(Message.tool(call, result))
             traces.append(
                 StepTrace(
@@ -187,10 +254,14 @@ def build_graph(
                     tool_name=call.tool_name,
                     ok=result.ok,
                     error_type=result.metadata.get("error_type"),
+                    # Tokens de las llamadas al modelo que hizo la tool por dentro
+                    # (0 si no llamó a ninguno): sin esto el costo del turno queda corto.
+                    input_tokens=result.metadata.get(MODEL_INPUT_TOKENS_KEY, 0),
+                    output_tokens=result.metadata.get(MODEL_OUTPUT_TOKENS_KEY, 0),
                     latency_ms=result.metadata.get("latency_ms", 0.0),
                 )
             )
-        return {"messages": messages, "trace": traces}
+        return {"messages": messages, "trace": traces, "ideas": ideas}
 
     def step_limit(state: AgentState) -> dict[str, Any]:
         # Los pedidos pendientes se responden igual, con error: un historial con
@@ -205,8 +276,8 @@ def build_graph(
             )
             for call in pending
         ]
-        logger.warning("agent_step_limit run_id=%s client_id=%s steps=%d", state["run_id"], state["client_id"],
-                       state["steps"])
+        emit(logger, "step_limit", level=logging.WARNING, run_id=state["run_id"], client_id=state["client_id"],
+             steps=state["steps"], max_steps=max_steps, not_executed=[call.tool_name for call in pending])
         return {
             "messages": [*closing, Message(role="model", text=STEP_LIMIT_REPLY)],
             "trace": [StepTrace(run_id=state["run_id"], kind="step_limit",
@@ -216,10 +287,14 @@ def build_graph(
     def route_after_model(state: AgentState) -> Literal["run_tools", "step_limit", "__end__"]:
         last = state["messages"][-1]
         if not last.tool_calls:
-            return END  # respuesta final o pedido de aclaración
-        if state["steps"] >= max_steps:
-            return "step_limit"
-        return "run_tools"
+            destination, reason = END, "el modelo respondió con texto"  # respuesta o pedido de aclaración
+        elif state["steps"] >= max_steps:
+            destination, reason = "step_limit", "pidió tools sin pasos disponibles"
+        else:
+            destination, reason = "run_tools", "pidió tools"
+        emit(logger, "route", run_id=state["run_id"], client_id=state["client_id"], to=destination,
+             reason=reason, step=state["steps"], max_steps=max_steps)
+        return destination
 
     builder = StateGraph(AgentState)
     builder.add_node("call_model", call_model)
@@ -229,7 +304,9 @@ def build_graph(
     builder.add_conditional_edges("call_model", route_after_model)
     builder.add_edge("run_tools", "call_model")
     builder.add_edge("step_limit", END)
-    return builder.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
+    if checkpointer is None:
+        checkpointer = InMemorySaver(serde=checkpoint_serializer())
+    return builder.compile(checkpointer=checkpointer)
 
 
 def open_session(client_id: str) -> AgentSession:
@@ -250,28 +327,49 @@ def run_turn(graph, session: AgentSession, user_text: str) -> TurnOutcome:
 
     # Si el hilo ya existe, tiene que ser del mismo cliente. Es la defensa para
     # cuando el thread_id llegue de afuera (la API, en la iteración 4).
-    existing = graph.get_state(config).values.get("client_id")
+    previous = graph.get_state(config).values
+    existing = previous.get("client_id")
     if existing is not None and existing != session.client_id:
         raise SessionClientMismatchError("la sesión pertenece a otro cliente")
+    # Las ideas se acumulan en la sesión: las de este turno son las que se
+    # suman después de las que ya había.
+    ideas_before = len(previous.get("ideas", []))
 
     run_id = llm.new_run_id()
-    final = graph.invoke(
-        {
-            "client_id": session.client_id,
-            "run_id": run_id,
-            "messages": [Message.user(text)],
-            "steps": 0,  # sin reducer: este valor reemplaza al del turno anterior
-        },
-        config,
-    )
+    # Todo lo que se emita durante el turno, en este hilo o en los de las
+    # tools y el proveedor, queda en `collector`.
+    with collect(run_id) as collector:
+        emit(logger, "turn_start", run_id=run_id, client_id=session.client_id, message_chars=len(text),
+             history_messages=len(previous.get("messages", [])))
+        final = graph.invoke(
+            {
+                "client_id": session.client_id,
+                "run_id": run_id,
+                "messages": [Message.user(text)],
+                "steps": 0,  # sin reducer: este valor reemplaza al del turno anterior
+            },
+            config,
+        )
+        trace = [step for step in final["trace"] if step.run_id == run_id]
+        ideas = final.get("ideas", [])[ideas_before:]
+        input_tokens = sum(step.input_tokens for step in trace)
+        output_tokens = sum(step.output_tokens for step in trace)
+        emit(
+            logger,
+            "turn_end",
+            run_id=run_id,
+            client_id=session.client_id,
+            steps=final["steps"],
+            tools_called=[step.tool_name for step in trace if step.kind == "tool" and step.tool_name],
+            ideas_added=len(ideas),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
-    trace = [step for step in final["trace"] if step.run_id == run_id]
-    outcome = TurnOutcome(reply=final["messages"][-1].text or "", run_id=run_id, trace=trace)
-    logger.info(
-        "agent_turn run_id=%s client_id=%s steps=%d tools_called=%s",
-        run_id,
-        session.client_id,
-        final["steps"],
-        ",".join(outcome.tools_called) or "-",
+    return TurnOutcome(
+        reply=final["messages"][-1].text or "",
+        run_id=run_id,
+        trace=trace,
+        ideas=ideas,
+        events=collector.events,
     )
-    return outcome

@@ -31,6 +31,20 @@ class TenantContext:
             raise InvalidClientIdError(f"client_id inválido: {self.client_id!r}")
 
 
+def list_client_ids() -> list[str]:
+    """Clientes con datos en data_dir, en orden alfabético.
+
+    Solo carpetas cuyo nombre es un client_id válido: una carpeta suelta como
+    "Borradores" no aparece como cliente.
+    """
+    data_dir = get_settings().data_dir
+    if not data_dir.is_dir():
+        return []
+    return sorted(
+        path.name for path in data_dir.iterdir() if path.is_dir() and _CLIENT_ID_PATTERN.fullmatch(path.name)
+    )
+
+
 def client_data_dir(tenant: TenantContext) -> Path:
     """Devuelve la carpeta de datos del cliente dentro de data_dir."""
     path = get_settings().data_dir / tenant.client_id
