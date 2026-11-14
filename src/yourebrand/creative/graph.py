@@ -28,6 +28,7 @@ from yourebrand.core import llm
 from yourebrand.core.errors import LLMError
 from yourebrand.core.providers import Message
 from yourebrand.core.reliability import validate_user_text
+from yourebrand.core.storage import VideoRef, get_video
 from yourebrand.core.tenancy import TenantContext, client_data_dir
 from yourebrand.core.tools import (
     MODEL_INPUT_TOKENS_KEY,
@@ -91,6 +92,9 @@ class AgentState(TypedDict):
     # Ideas generadas en la sesión, con su id. Las tools que vengan después
     # (refinar, guardar en Notion) las buscan acá por id, sin que el modelo las reescriba.
     ideas: Annotated[list[GeneratedIdea], operator.add]
+    # Videos adjuntados en la sesión: solo la referencia (id, duración, tamaño),
+    # nunca el archivo, que vive en core/storage.py.
+    videos: Annotated[list[VideoRef], operator.add]
 
 
 @dataclass(frozen=True)
@@ -138,7 +142,7 @@ class SessionClientMismatchError(ValueError):
 # que están en esta lista: si la base de checkpoints se adulterara, no podría
 # hacer que se construya cualquier otra clase de Python. Si el estado suma un
 # tipo nuevo, va acá; un test lo controla.
-CHECKPOINT_TYPES: tuple[type, ...] = (Message, ToolCall, ToolResult, StepTrace, GeneratedIdea)
+CHECKPOINT_TYPES: tuple[type, ...] = (Message, ToolCall, ToolResult, StepTrace, GeneratedIdea, VideoRef)
 
 
 def checkpoint_serializer() -> JsonPlusSerializer:
@@ -320,9 +324,41 @@ def open_session(client_id: str) -> AgentSession:
     return AgentSession(thread_id=uuid.uuid4().hex, client_id=tenant.client_id)
 
 
-def run_turn(graph, session: AgentSession, user_text: str) -> TurnOutcome:
-    """Corre un turno completo: mensaje del usuario, tools que decida el modelo y respuesta."""
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "duración desconocida"
+    minutes, secs = divmod(round(seconds), 60)
+    return f"{minutes}:{secs:02d}"
+
+
+def attachment_note(video: VideoRef) -> str:
+    """Línea que se suma al mensaje del usuario para que el modelo sepa que hay un video.
+
+    La escribe el sistema, no la persona: el formato es fijo y el nombre del
+    archivo ya viene limpio de core/storage.py.
+    """
+    size_mb = video.size_bytes / (1024 * 1024)
+    return (
+        f"[Video adjunto: id {video.id} · «{video.filename}» · {_format_duration(video.duration_s)} · "
+        f"{size_mb:.1f} MB]"
+    )
+
+
+def run_turn(
+    graph, session: AgentSession, user_text: str, video_ids: list[str] | tuple[str, ...] = ()
+) -> TurnOutcome:
+    """Corre un turno completo: mensaje del usuario, tools que decida el modelo y respuesta.
+
+    `video_ids` son videos ya subidos que la persona adjunta a este mensaje.
+    Se buscan con el cliente de la sesión: un id de otro cliente no existe acá.
+    """
     text = validate_user_text(user_text)
+    tenant = TenantContext(session.client_id)
+    # Sin repetidos y en orden. get_video lanza UnknownVideoError si el id no es
+    # de este cliente, antes de tocar el grafo o llamar al modelo.
+    videos = [get_video(tenant, video_id) for video_id in dict.fromkeys(video_ids)]
+    if videos:
+        text = "\n\n".join([text, *(attachment_note(video) for video in videos)])
     config = {"configurable": {"thread_id": session.thread_id}}
 
     # Si el hilo ya existe, tiene que ser del mismo cliente. Es la defensa para
@@ -334,6 +370,10 @@ def run_turn(graph, session: AgentSession, user_text: str) -> TurnOutcome:
     # Las ideas se acumulan en la sesión: las de este turno son las que se
     # suman después de las que ya había.
     ideas_before = len(previous.get("ideas", []))
+    # Un video que ya estaba en la sesión se vuelve a mencionar en el mensaje,
+    # pero no se suma dos veces al estado.
+    known_videos = {video.id for video in previous.get("videos", [])}
+    new_videos = [video for video in videos if video.id not in known_videos]
 
     run_id = llm.new_run_id()
     # Todo lo que se emita durante el turno, en este hilo o en los de las
@@ -341,12 +381,16 @@ def run_turn(graph, session: AgentSession, user_text: str) -> TurnOutcome:
     with collect(run_id) as collector:
         emit(logger, "turn_start", run_id=run_id, client_id=session.client_id, message_chars=len(text),
              history_messages=len(previous.get("messages", [])))
+        for video in videos:
+            emit(logger, "video_attached", run_id=run_id, client_id=session.client_id, video_id=video.id,
+                 container=video.container, size_bytes=video.size_bytes, duration_s=video.duration_s)
         final = graph.invoke(
             {
                 "client_id": session.client_id,
                 "run_id": run_id,
                 "messages": [Message.user(text)],
                 "steps": 0,  # sin reducer: este valor reemplaza al del turno anterior
+                "videos": new_videos,
             },
             config,
         )

@@ -11,6 +11,8 @@ dependencies = [
     "pydantic-settings",
     "langgraph>=1.2,<2",
     "fastapi",
+    # FastAPI la necesita para recibir archivos (la subida de videos).
+    "python-multipart>=0.0.20",
     "uvicorn",
     "qdrant-client",
     "supabase",

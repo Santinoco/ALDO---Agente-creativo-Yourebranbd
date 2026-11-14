@@ -23,6 +23,10 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "test", "production"] = "development"
     data_dir: Path = PROJECT_ROOT / "data"
+    # Videos subidos y lo que se deriva de ellos. Local, en la máquina donde corre
+    # la app; fuera de git. Ver core/storage.py.
+    storage_dir: Path = PROJECT_ROOT / "storage"
+    max_video_mb: int = Field(default=500, gt=0)
 
     # LLM: sin ellos no funciona ningún componente. Solo es obligatoria la
     # clave del proveedor elegido (ver _require_provider_key).

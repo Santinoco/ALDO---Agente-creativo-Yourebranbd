@@ -1,6 +1,8 @@
 .venv/
 .env
 data/miramarExpress/
+# Videos subidos por las personas: pueden ser material real de clientes.
+storage/
 venv/
 __pycache__/
 *.egg-info/

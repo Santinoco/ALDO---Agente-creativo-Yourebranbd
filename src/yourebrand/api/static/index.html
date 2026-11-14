@@ -61,6 +61,22 @@
   .idea .id { font: 12px var(--mono); color: var(--muted); }
 
   form.composer { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); background: var(--panel); }
+  .attach {
+    display: grid; place-items: center; width: 44px; flex-shrink: 0; cursor: pointer; font-size: 18px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+  }
+  .attach.disabled { opacity: .5; cursor: default; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 20px 0; border-top: 1px solid var(--line); background: var(--panel); }
+  .attachment {
+    display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 6px 10px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 13px;
+  }
+  .attachment .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+  .attachment .meta { color: var(--muted); font: 12px var(--mono); }
+  .attachment progress { width: 110px; }
+  .attachment button { padding: 0 6px; border: 0; background: none; color: var(--muted); }
+  .msg .video-chip { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--muted); }
   textarea {
     flex: 1; resize: none; height: 44px; max-height: 160px; padding: 10px 12px;
     border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
@@ -100,7 +116,12 @@
     <div class="messages" id="messages">
       <div class="empty" id="empty">Elegí un cliente y pedile ideas al agente. Por ejemplo: <em>"Necesito ideas para el feed"</em>.</div>
     </div>
+    <div class="attachments" id="attachments" hidden></div>
     <form class="composer" id="composer">
+      <label class="attach" title="Adjuntar un video (MP4 o MOV)">
+        <input type="file" id="video-input" accept="video/mp4,video/quicktime,.mp4,.mov" hidden>
+        <span aria-hidden="true">📎</span><span class="visually-hidden">Adjuntar video</span>
+      </label>
       <textarea id="text" placeholder="Escribí tu pedido…" aria-label="Mensaje" rows="1"></textarea>
       <button class="primary" id="send" type="submit">Enviar</button>
     </form>
@@ -113,7 +134,8 @@
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { threadId: null, turn: 0, busy: false };
+// pendingVideos: videos ya subidos que viajan con el próximo mensaje.
+const state = { threadId: null, turn: 0, busy: false, uploading: false, pendingVideos: [] };
 
 // Todo texto pasa por escape antes de entrar al HTML: las respuestas vienen del
 // modelo y no se confía en ellas.
@@ -249,6 +271,9 @@ function describeEvent(e) {
     case "client_context":
       return ["📄", "Cargó el material del cliente",
         `marca: ${f.brand_chars} caracteres · posts: ${f.has_posts ? `${f.posts_chars} caracteres` : "no hay"}`];
+    case "video_attached":
+      return ["🎬", `Video adjunto ${code(f.video_id)}`,
+        [f.container.toUpperCase(), formatDuration(f.duration_s) || "duración desconocida", formatSize(f.size_bytes)].join(" · ")];
     case "skill_loaded":
       return ["📘", `Cargó la skill ${code(f.skill)}`,
         `versión ${escapeHtml(f.version)}${f.status === "borrador" ? " · borrador" : ""} · ${f.chars} caracteres`];
@@ -343,6 +368,9 @@ async function newSession({ keepChat = false } = {}) {
   const session = await api("/sessions", { client_id: clientId });
   state.threadId = session.thread_id;
   state.turn = 0;
+  // Los videos se guardan por cliente: los pendientes no pasan a otra conversación.
+  state.pendingVideos = [];
+  renderAttachments();
   if (keepChat) {
     addMessage("notice", `Conversación nueva con ${clientId}. El agente no recuerda lo anterior.`);
   } else {
@@ -354,16 +382,98 @@ async function newSession({ keepChat = false } = {}) {
 
 function setBusy(busy) {
   state.busy = busy;
-  $("send").disabled = busy;
-  $("text").disabled = busy;
+  refreshControls();
+}
+
+// Mientras sube un video no se puede enviar: el mensaje tiene que llevar su id.
+function refreshControls() {
+  $("send").disabled = state.busy || state.uploading;
+  $("text").disabled = state.busy;
+  $("video-input").disabled = state.busy || state.uploading;
+  document.querySelector(".attach").classList.toggle("disabled", state.busy || state.uploading);
+}
+
+const formatSize = (bytes) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+const formatDuration = (s) => s == null ? "" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+const videoMeta = (v) => [formatDuration(v.duration_s), formatSize(v.size_bytes)].filter(Boolean).join(" · ");
+
+function renderAttachments(uploading = null) {
+  const box = $("attachments");
+  const items = state.pendingVideos.map((v, i) => `
+    <div class="attachment">🎬 <span class="name">${escapeHtml(v.filename)}</span>
+      <span class="meta">${escapeHtml(videoMeta(v))}</span>
+      <button type="button" data-remove="${i}" title="Quitar">✕</button></div>`);
+  if (uploading) {
+    items.push(`<div class="attachment">⏳ <span class="name">${escapeHtml(uploading.name)}</span>
+      <progress max="100" value="${uploading.percent}"></progress>
+      <span class="meta">${uploading.percent}%</span></div>`);
+  }
+  box.innerHTML = items.join("");
+  box.hidden = items.length === 0;
+}
+
+// Errores de subida explicados en palabras, con el código HTTP para quien depura.
+function uploadErrorMessage(status, detail) {
+  if (status === 0) return `No se pudo conectar con el servidor en ${location.origin}. Verificá que esté levantado.`;
+  if (status === 413) return `El video es demasiado grande (${detail ?? "supera el máximo"}).`;
+  if (status === 415) return "No es un video MP4 ni MOV: solo se pueden subir esos formatos.";
+  if (status === 404) return "La conversación ya no existe en el servidor (se reinició). Abrí una nueva y volvé a subir el video.";
+  return `Error del servidor al subir el video (HTTP ${status})${detail ? `: ${detail}` : ""}.`;
+}
+
+// XMLHttpRequest y no fetch: es la forma estándar de tener el progreso de subida.
+function uploadVideo(file) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("file", file);
+    const request = new XMLHttpRequest();
+    request.open("POST", `/sessions/${state.threadId}/videos`);
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) renderAttachments({ name: file.name, percent: Math.round((event.loaded / event.total) * 100) });
+    };
+    request.onload = () => {
+      let data = {};
+      try { data = JSON.parse(request.responseText); } catch { /* respuesta sin JSON */ }
+      if (request.status >= 200 && request.status < 300) resolve(data);
+      else reject(new Error(uploadErrorMessage(request.status, detailText(data.detail))));
+    };
+    request.onerror = () => reject(new Error(uploadErrorMessage(0)));
+    request.send(form);
+  });
+}
+
+async function attachVideo(file) {
+  if (!file || !state.threadId) return;
+  state.uploading = true;
+  refreshControls();
+  renderAttachments({ name: file.name, percent: 0 });
+  try {
+    state.pendingVideos.push(await uploadVideo(file));
+  } catch (error) {
+    addMessage("error", `No se pudo subir «${file.name}». ${error.message}`);
+  } finally {
+    state.uploading = false;
+    $("video-input").value = "";
+    renderAttachments();
+    refreshControls();
+  }
 }
 
 async function send(event) {
   event.preventDefault();
-  const text = $("text").value.trim();
-  if (!text || state.busy || !state.threadId) return;
+  const videos = [...state.pendingVideos];
+  // Con un video adjunto se puede enviar sin texto: el mensaje lo describe igual.
+  const text = $("text").value.trim() || (videos.length ? "Te adjunto un video." : "");
+  if (!text || state.busy || state.uploading || !state.threadId) return;
   $("text").value = "";
   addMessage("user", text);
+  if (videos.length) {
+    const last = $("messages").lastElementChild;
+    last.insertAdjacentHTML("beforeend", videos.map((v) =>
+      `<div class="video-chip">🎬 ${escapeHtml(v.filename)} · ${escapeHtml(videoMeta(v))}</div>`).join(""));
+  }
+  state.pendingVideos = [];
+  renderAttachments();
   setBusy(true);
 
   const thinking = document.createElement("div");
@@ -375,14 +485,16 @@ async function send(event) {
   }, 250);
 
   try {
-    const data = await api(`/sessions/${state.threadId}/messages`, { text });
+    const data = await api(`/sessions/${state.threadId}/messages`, { text, video_ids: videos.map((v) => v.id) });
     state.turn += 1;
     addMessage("agent", data.reply, { markdown: true });
     addIdeas(data.ideas);
     addTrace(state.turn, data, performance.now() - started);
   } catch (error) {
-    // El texto vuelve al cuadro para reenviarlo sin reescribirlo.
+    // El texto y los videos vuelven al cuadro para reenviarlos sin rehacerlos.
     $("text").value = text;
+    state.pendingVideos = videos;
+    renderAttachments();
     if (error.status === 404 && error.detail === "sesión desconocida") {
       // Las sesiones viven en la memoria del servidor (hasta la iteración 3):
       // si se reinició, esta conversación ya no existe allá.
@@ -401,6 +513,14 @@ async function send(event) {
 }
 
 $("composer").addEventListener("submit", send);
+$("video-input").addEventListener("change", (event) => attachVideo(event.target.files[0]));
+$("attachments").addEventListener("click", (event) => {
+  const index = event.target.dataset?.remove;
+  if (index === undefined) return;
+  // Quitarlo solo lo saca del mensaje: el archivo ya subido queda guardado.
+  state.pendingVideos.splice(Number(index), 1);
+  renderAttachments();
+});
 // Enter envía; Shift+Enter agrega un salto de línea.
 $("text").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); }

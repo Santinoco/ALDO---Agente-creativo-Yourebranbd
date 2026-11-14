@@ -54,13 +54,13 @@ Aprobó el alcance: un único agente (el Creativo), el Supervisor para después 
 
 1. **Agente Creativo** (`src/yourebrand/creative/`): es el TFI. Lo usan los empleados de la agencia en una conversación: piden ideas de contenido para un cliente (UGC o diseño), las refinan con comentarios y guardan en Notion las que eligen. El modelo decide qué tool usar en cada turno; no hay una secuencia fija.
    - Usa como contexto la información de la empresa y, si hay, sus posts anteriores, para que las ideas sigan la línea de la marca y del feed.
-   - Entrega ideas en texto; no produce la pieza final. La generación de imágenes está postergada.
-   - Tools previstas (el diseño fino se cierra al implementarlas): `get_brand_info`, `get_previous_posts`, `generate_ideas`, `refine_idea`, `check_similarity`, `save_ideas_to_notion`.
+   - Entrega ideas en texto y, para UGC, **produce la pieza final**: la persona sube el video crudo y el agente devuelve el video editado (ver "Edición de video UGC"). La generación de imágenes sigue postergada.
+   - Tools previstas (el diseño fino se cierra al implementarlas): `get_brand_info`, `get_previous_posts`, `generate_ideas`, `refine_idea`, `check_similarity`, `save_ideas_to_notion` y las de edición de video, `plan_video_edit` y `render_video` (ver "Edición de video UGC").
    - Decisiones agénticas concretas, además de elegir tool:
      - **Pedir aclaraciones**: si al pedido le falta algo que hace falta para generar (por ejemplo, el tipo de contenido), el agente pregunta en vez de suponer. No es una tool: es el camino del grafo en el que el modelo termina el turno sin llamar a ninguna.
      - **Evitar repetir**: `check_similarity` compara ideas contra los posts anteriores (y, desde la iteración 3, contra las ideas ya guardadas en Notion) y dice cuáles se parecen demasiado, a qué y por qué. Es una tool aparte y no un paso dentro de `generate_ideas` para que el modelo decida cuándo usarla; si fuera fija, sería un pipeline. Compara con el modelo rápido (`MODEL_FAST`) y el material entero en el contexto, sin embeddings.
-   - Skills: archivos `creative/skills/<nombre>/SKILL.md` (encabezado y criterio en Markdown), editables sin tocar código. `ugc-ideation` y `design-ideation` tienen el criterio de cada tipo de contenido y cuándo pedir aclaraciones y verificar similitud; `generate_ideas` aplica la del tipo pedido. `ugc-video-editing` (borrador, noviembre 2026) tiene el criterio de edición de UGC; falta validarla con el equipo de edición. El prompt del agente lista las skills y la tool `load_skill` trae el criterio completo cuando el modelo decide que lo necesita.
-   - Human-in-the-loop: `save_ideas_to_notion` nunca escribe sin aprobación. El agente propone qué guardar, se pausa, y la persona aprueba, modifica o rechaza.
+   - Skills: archivos `creative/skills/<nombre>/SKILL.md` (encabezado y criterio en Markdown), editables sin tocar código. `ugc-ideation` y `design-ideation` tienen el criterio de cada tipo de contenido y cuándo pedir aclaraciones y verificar similitud; `generate_ideas` aplica la del tipo pedido. `ugc-video-editing` tiene el criterio de edición de UGC, tomado de la guía del equipo de edición de Yourebrand (noviembre 2026); quedan puntos por definir con el equipo, listados al final de la skill. El prompt del agente lista las skills y la tool `load_skill` trae el criterio completo cuando el modelo decide que lo necesita.
+   - Human-in-the-loop: `save_ideas_to_notion` nunca escribe sin aprobación. El agente propone qué guardar, se pausa, y la persona aprueba, modifica o rechaza. Lo mismo con un video: `render_video` solo corre con un plan de edición que la persona aprobó.
    - Memoria por marca (propuesta; se decide si entra al TFI al cerrar la iteración 3): además del estado de cada sesión, el agente guarda entre conversaciones las preferencias del cliente que surgen al hablar con el empleado (por ejemplo, una corrección) y las tiene en cuenta en pedidos futuros. Reglas:
      - Cada memoria pertenece a un solo `client_id`; el filtro vive en `core/`, como el resto.
      - No reemplaza a Notion: lo pactado y la información oficial de la marca viven en Notion. Si se contradicen, gana Notion.
@@ -76,8 +76,9 @@ Aprobó el alcance: un único agente (el Creativo), el Supervisor para después 
 - **LangGraph para el grafo, la pausa y la persistencia** (`interrupt` y checkpointer). Se adelanta desde el Supervisor porque el motivo que lo justificaba, human-in-the-loop, ahora es un requisito.
 - **LangGraph sin los modelos de chat de LangChain**: los nodos son funciones propias que llaman a `core/llm.py`. Se mantiene el contrato `LLMProvider` y el registro de tokens, latencia y `run_id`. El costo es escribir a mano el nodo que ejecuta las tools en vez de usar los prearmados (`create_react_agent`, `ToolNode`).
 - **Persistencia en SQLite** para el TFI: sin servicios que levantar, así otra persona puede reproducir el proyecto. Supabase queda para después.
-- **Stack**: Python 3.12, FastAPI, LangGraph con checkpointer SQLite, Notion API y, como modelo, la API de Gemini (un Flash para generación y un Flash-Lite para tareas de volumen; los nombres van en `.env`).
+- **Stack**: Python 3.12, FastAPI, LangGraph con checkpointer SQLite, Notion API y, como modelos, la API de Gemini para la conversación y las ideas (un Flash para generación y un Flash-Lite para tareas de volumen) y la API de Claude para la edición de video. Los nombres de modelo van en `.env`.
 - **Gemini como proveedor por costos** (octubre 2026). Claude queda implementado detrás del mismo contrato y se puede volver a usar cambiando `LLM_PROVIDER`; solo se exige la clave del proveedor elegido. El plan gratuito de Gemini usa el contenido para mejorar los productos de Google: sirve con los clientes ficticios de `data/`, nunca con datos reales.
+- **Claude Opus 5.5 para la edición de video** (noviembre 2026), sin importar `LLM_PROVIDER`: la tarea de edición siempre usa el proveedor de Claude, con el modelo en `MODEL_VIDEO_EDIT` (`claude-opus-5-5`). La clave de Claude se exige solo si la edición de video está habilitada.
 - **Nada se escribe en un sistema externo sin aprobación humana.**
 - **Un solo paquete, un solo venv, un solo `pyproject.toml`.**
 
@@ -147,6 +148,38 @@ No construir nada de esto antes del 8 de noviembre. Se retoma después de la ent
 - **Evaluación automática con un modelo como juez**, salvo que sobre tiempo en la iteración 5.
 
 `core/db.py` existe vacío para estos componentes; no se toca durante el TFI.
+
+## Edición de video UGC
+
+Decidido en noviembre de 2026: el agente edita videos UGC y devuelve la pieza final. Reemplaza la decisión anterior ("entrega ideas en texto; no produce la pieza final").
+
+Flujo previsto:
+
+1. **Carga:** la persona sube el video crudo (uno largo con pausas que marcan los cortes, o varios clips). El video queda guardado aislado por `client_id`; el filtro vive en `core/`, como el resto.
+2. **Preparación (sin modelo):** con ffmpeg se extraen los metadatos, las pausas, el audio y fotogramas; el audio se transcribe con tiempos por palabra.
+3. **Plan de edición (Claude Opus 5.5):** Claude no recibe video ni audio, solo imágenes y texto (verificado en noviembre de 2026). Recibe los fotogramas como imágenes, la transcripción con tiempos y la skill `ugc-video-editing`, y devuelve un plan de edición estructurado y validado con Pydantic.
+4. **Aprobación:** el agente se pausa con el plan; la persona aprueba, modifica o rechaza antes de renderizar.
+5. **Render (sin modelo):** ffmpeg arma el video a partir del plan aprobado: cortes, zooms, b-roll, subtítulos palabra por palabra y música.
+
+Reglas:
+
+- El estado del grafo guarda referencias al video (id, duración, tamaño), nunca el archivo.
+- La edición es un trabajo largo: no se hace dentro de una petición HTTP que espera.
+- La música sale de una librería propia de temas de libre uso: la de CapCut, que usa el equipo, no tiene acceso programático.
+- Videos reales de clientes: solo con proveedores cuyos términos no usen el contenido para entrenar. El plan gratuito de Gemini queda descartado para esto.
+
+Arquitectura (noviembre 2026):
+
+- **La conversación sigue con el modelo barato y Opus 5.5 entra solo en el plan.** El agente es el mismo de siempre; la edición son dos tools que el modelo de la conversación decide cuándo usar:
+  - `plan_video_edit(video_id)`: llama a Opus 5.5 con los fotogramas, la transcripción y la skill, y devuelve el plan. Los fotogramas entran solo en esa llamada, nunca en la conversación: al historial vuelve el plan resumido.
+  - `render_video`: arma el video con ffmpeg a partir del plan aprobado. Corre en segundo plano, sin modelo.
+- **Dos tools y no una, por la aprobación:** la pausa vive en el grafo, entre las dos. Adentro de una tool no se puede pausar, porque las tools corren en hilos aparte.
+- **`plan_video_edit` es una llamada estructurada, no un subagente** con su propio loop, igual que `generate_ideas`. Así se mantiene la decisión de agente único. Si la evaluación muestra que el plan falla por falta de información (por ejemplo, necesitar más fotogramas alrededor de un corte), se evalúa darle a Opus tools propias de consulta.
+- **`core/llm.py` suma un nivel por tarea**, `video_edit`, que siempre usa el proveedor de Claude con `MODEL_VIDEO_EDIT`. El contrato `LLMProvider` y `Message` pasan a admitir imágenes.
+
+Almacenamiento (noviembre 2026): **local, en la máquina donde corre la app**, que es la de la persona que pide la edición. Los videos y todo lo que se deriva de ellos (fotogramas, transcripción, renders) van en una carpeta por `client_id`, fuera de git, y se acceden solo desde un módulo de `core/` (`core/storage.py`) que arma las rutas con el prefijo del cliente. Consecuencia: las sesiones y los videos no se comparten entre personas. Si más adelante la app corre en un servidor para el equipo, se cambia ese módulo por almacenamiento en la nube (candidato: Supabase Storage, ya previsto en el plan) sin tocar el resto.
+
+Por decidir: con qué se transcribe el audio (recomendado: Whisper en la misma máquina, con tiempos por palabra) y cómo se ejecuta el trabajo largo.
 
 ## Postergado: generación de imágenes
 

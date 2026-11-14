@@ -12,11 +12,19 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from yourebrand.core.reliability import InvalidUserInputError
+from yourebrand.core.storage import (
+    InvalidVideoError,
+    UnknownVideoError,
+    VideoRef,
+    VideoTooLargeError,
+    save_video,
+)
+from yourebrand.core.tenancy import TenantContext
 from yourebrand.core.tenancy import InvalidClientIdError, UnknownClientError, list_client_ids
 from yourebrand.core.trace import TraceEvent
 from yourebrand.creative.graph import (
@@ -44,6 +52,8 @@ class SessionResponse(BaseModel):
 
 class MessageRequest(BaseModel):
     text: str
+    # Videos ya subidos con POST /sessions/{thread_id}/videos que se adjuntan a este mensaje.
+    video_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 class TurnResponse(BaseModel):
@@ -114,6 +124,23 @@ def create_app(graph=None) -> FastAPI:
         app.state.sessions.add(session)
         return SessionResponse(thread_id=session.thread_id, client_id=session.client_id)
 
+    # Subida de un video. El cliente sale de la sesión abierta en el servidor,
+    # nunca de la petición: así no se puede guardar un video en otro cliente.
+    # `def`: copiar cientos de MB bloquea, y FastAPI lo corre en otro hilo.
+    @app.post("/sessions/{thread_id}/videos")
+    def upload_video(thread_id: str, file: UploadFile = File(...)) -> VideoRef:
+        session = app.state.sessions.get(thread_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="sesión desconocida")
+        try:
+            return save_video(TenantContext(session.client_id), file.file, file.filename)
+        except VideoTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from None
+        except InvalidVideoError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from None
+        finally:
+            file.file.close()
+
     # `def` y no `async def`: run_turn bloquea mientras el modelo responde, y
     # FastAPI corre las funciones comunes en un hilo aparte sin frenar al resto.
     @app.post("/sessions/{thread_id}/messages")
@@ -122,10 +149,12 @@ def create_app(graph=None) -> FastAPI:
         if session is None:
             raise HTTPException(status_code=404, detail="sesión desconocida")
         try:
-            outcome = run_turn(app.state.graph, session, request.text)
+            outcome = run_turn(app.state.graph, session, request.text, request.video_ids)
         except InvalidUserInputError as exc:
             # El mensaje describe la forma del texto, nunca lo cita.
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        except UnknownVideoError:
+            raise HTTPException(status_code=404, detail="video desconocido") from None
         except SessionClientMismatchError:
             raise HTTPException(status_code=409, detail="la sesión pertenece a otro cliente") from None
         return TurnResponse(
