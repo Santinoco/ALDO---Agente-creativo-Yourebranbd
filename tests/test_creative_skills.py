@@ -14,6 +14,8 @@ from yourebrand.creative.skills import (
     load_skills,
     parse_skill,
 )
+from yourebrand.creative import skills as skills_module
+from yourebrand.creative import tools as tools_module
 from yourebrand.creative.tools import build_creative_registry
 
 VALID = """---
@@ -97,8 +99,13 @@ def test_bundled_skills_load():
     assert list(available_skills()) == ["design-ideation", "ugc-ideation", "ugc-video-editing"]
 
 
-def test_video_editing_skill_is_marked_as_draft():
-    assert get_skill("ugc-video-editing").status == "borrador"
+def test_video_editing_skill_follows_the_agency_guide():
+    # Validada con la guía de edición de Yourebrand (noviembre 2026).
+    skill = get_skill("ugc-video-editing")
+
+    assert skill.status == "activa"
+    for rule in ("palabra por palabra", "Sin transiciones", "libre uso", "llamado a la acción"):
+        assert rule in skill.body
 
 
 @pytest.mark.parametrize("name", ["ugc-ideation", "design-ideation", "ugc-video-editing"])
@@ -135,9 +142,14 @@ def test_agent_prompt_lists_skills_without_their_body():
     for skill in available_skills().values():
         assert f"- {skill.name}" in prompt
         assert skill.description in prompt
-    assert "ugc-video-editing (borrador)" in prompt
     # Solo el índice: el criterio completo lo trae load_skill.
     assert get_skill("ugc-video-editing").criteria not in prompt
+
+
+def test_agent_prompt_marks_draft_skills():
+    draft = parse_skill(VALID, folder_name="mi-skill")
+
+    assert "- mi-skill (borrador): Para probar." in build_agent_system_prompt(skills=[draft])
 
 
 def test_agent_prompt_without_skills_has_no_skills_section():
@@ -167,10 +179,20 @@ def test_load_skill_returns_the_full_skill():
     assert result.metadata["status"] == "activa"
 
 
-def test_load_skill_warns_when_the_skill_is_a_draft():
-    result = run_load_skill({"name": "ugc-video-editing"})
+def test_load_skill_warns_when_the_skill_is_a_draft(monkeypatch):
+    draft = parse_skill(VALID, folder_name="mi-skill")
+    monkeypatch.setattr(skills_module, "available_skills", lambda: {"mi-skill": draft})
+    monkeypatch.setattr(tools_module, "available_skills", lambda: {"mi-skill": draft})
+
+    result = run_load_skill({"name": "mi-skill"})
 
     assert "borrador" in result.content.splitlines()[1]
+
+
+def test_load_skill_of_an_active_skill_has_no_draft_warning():
+    result = run_load_skill({"name": "ugc-video-editing"})
+
+    assert "borrador" not in result.content.splitlines()[1]
 
 
 def test_load_skill_with_unknown_name_is_a_validation_error():

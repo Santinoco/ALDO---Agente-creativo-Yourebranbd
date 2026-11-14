@@ -1,126 +1,142 @@
 ---
 name: ugc-video-editing
-description: Criterio de Yourebrand para editar un video UGC crudo y convertirlo en una pieza lista para Reels o TikTok. Usala cuando la persona sube un video para editar o pide cómo editar una idea UGC.
-status: borrador
-version: 0.1
+description: Criterio de Yourebrand para editar un video UGC crudo y convertirlo en una pieza para Reels, TikTok o historias. Usala cuando la persona sube un video para editar o pide cómo editar una idea UGC.
+status: activa
+version: 1.0
 ---
 
 # Edición de videos UGC
 
-> **Borrador.** Lo escribió el equipo de desarrollo con buenas prácticas generales, sin validarlo con el equipo de edición de Yourebrand. Los puntos marcados con **[validar]** se van a reemplazar por el criterio real de la agencia. Ver "Pendiente de validar" al final.
+Basada en la guía de edición del equipo de Yourebrand (noviembre 2026). Los puntos que la guía todavía no define están marcados con **[a definir]** y listados al final.
 
-## Para qué es
+## Principio general
 
-Un video UGC tiene que parecer hecho por una persona, no por una marca. La edición no lo "produce": lo **ordena** para que se entienda rápido, enganche en los primeros segundos y deje claro qué gana quien lo mira. Si después de editar parece un aviso, se editó de más.
+El video tiene que parecer **UGC**, contenido hecho por una persona, y no un video editado de YouTube: **dinámico, limpio y sin recargar**. Ante la duda entre sumar algo o dejarlo afuera, dejalo afuera.
 
-## Qué recibís y qué devolvés
+## El material que llega
 
-**Recibís:** uno o varios clips crudos del creador, la información de la marca y, si existe, la idea UGC de la que salió el video.
+- **Dos formatos habituales:**
+  - **Un solo video largo**, de 1 a 2 minutos, grabado con iPhone. El creador marca los cortes con pausas dentro del mismo video: esas pausas son los puntos de corte.
+  - **Varios clips sueltos.**
+- **Orientación:** casi siempre vertical. Lo horizontal es la excepción; si llega, reencuadrá a vertical sin cortar caras ni el producto, y si no se puede, avisalo.
+- **B-roll:** por lo general hay mucho material de apoyo disponible, y **hay que usarlo**.
+- **Sin guion:** el creador improvisa, a veces a partir de ideas de títulos o temas. Por eso el orden de grabación casi nunca es el orden final: armá la historia con lo mejor del material.
 
-**Devolvés primero un plan de edición**, que una persona aprueba antes de renderizar:
+## Qué devolvés: el plan de edición
 
-1. **Gancho elegido:** qué momento del material abre el video y por qué.
-2. **Tramos:** de qué clip sale cada uno, dónde empieza y dónde termina, y para qué está (gancho, desarrollo, prueba, cierre).
-3. **Subtítulos:** el texto de cada bloque, fiel a lo que se dice.
-4. **Textos en pantalla:** cuáles, en qué momento y con qué función.
-5. **Sonido:** música (estilo y volumen respecto de la voz) y efectos, si los hay.
-6. **Duración final** y red de destino.
-7. **Por qué encaja con la marca**, en una oración.
-8. **Advertencias:** lo que no se pudo resolver con el material (audio malo, falta un plano, un dato que hay que confirmar).
+Antes de editar devolvés un plan, que una persona aprueba:
+
+1. **Tipo de video:** recomendación de usuario o venta / testimonio (ver "Estructura"). Define el gancho y el cierre.
+2. **Gancho elegido:** qué momento abre el video y por qué.
+3. **Tramos:** de qué clip sale cada uno, dónde empieza y dónde termina, para qué está, y qué b-roll va encima de la voz.
+4. **Subtítulos:** el texto, fiel a lo que se dice, y si van palabra por palabra o frase por frase.
+5. **Textos en pantalla:** qué palabras se resaltan y en qué momento.
+6. **Sonido:** música de la librería de libre uso y efectos, si hay alguno.
+7. **Duración final** y red de destino.
+8. **Advertencias:** lo que no se pudo resolver con el material (audio malo, falta b-roll, un dato que hay que confirmar).
+
+## Duración
+
+- **Referencia:** alrededor de **1 minuto, más o menos 20 segundos**.
+- **Rango posible:** desde **10 a 40 segundos** hasta **1:20 como máximo**.
+- Más corto es mejor si se entiende igual: nunca estires un video para llegar al minuto.
 
 ## Estructura
 
-Por defecto, cuatro partes. Si el material pide otra cosa, adaptala y explicá por qué en el plan.
+Por lo general, **hay un problema que se resuelve**. Antes de armar, identificá qué tipo de video es:
 
-| Parte | Duración aproximada | Qué pasa |
+| Tipo | Ejemplo | Cómo se arma |
 |---|---|---|
-| Gancho | 0 a 3 s | Lo más fuerte del material: una pregunta, un problema, un resultado o algo que llama la atención |
-| Desarrollo | hasta ~70 % del video | La persona cuenta o muestra la experiencia, en orden y sin vueltas |
-| Prueba | un momento | Algo que se ve y respalda lo que se dice: el producto en uso, el antes y después, el dato |
-| Cierre | 2 a 4 s | Qué hacer ahora: ir, probar, guardar el video, comentar |
+| **Recomendación de usuario** | Vamos a una cafetería, probamos los productos y la recomendamos | La experiencia en primera persona: llegar, probar, contar qué le gustó |
+| **Venta / testimonio** | "Tenía este problema, no encontraba una buena obra social y ahora la encontré" | Problema, cómo lo resolvió con la marca, resultado |
 
-**Duración final:** entre 15 y 35 segundos para Reels y TikTok **[validar]**. Más corto es mejor si se entiende igual.
+## Los primeros 3 segundos
 
-## El gancho
+- **Tiene que haber un buen gancho.** Si el mejor momento está a la mitad del material, movelo al principio.
+- **Excepción:** los videos más comerciales o de venta y los videos hechos solo con b-roll no siempre llevan un gancho fuerte. No fuerces uno que no está en el material.
 
-- **Arrancá en acción.** Nada de "hola, soy…", logos ni introducciones. El primer fotograma ya tiene que estar pasando algo.
-- **Si el mejor momento está a la mitad del material, movelo al principio.** El orden de grabación no es el orden de edición.
-- **Sumá un texto de gancho en el primer fotograma** que resuma la promesa en pocas palabras. Mucha gente mira sin sonido.
-- **Que el gancho se cumpla:** lo que promete el arranque tiene que aparecer en el video. Un gancho engañoso hace que la gente se vaya y desgasta a la marca.
+## Cierre y llamado a la acción
 
-## Cortes y ritmo
+- **Siempre hay llamado a la acción.**
+- **Tiene que estar disimulado:** natural, que no se sienta comercial. Un usuario que recomienda una cafetería y cierra con "escriban al WhatsApp" queda forzado.
+- **Depende del tipo de video:** en una recomendación, el cierre es una invitación como la haría alguien que recomienda ("si pasás por la zona, andá"); en un video de venta puede ser más directo, sin dejar de sonar a persona.
+- **Logo o placa final:** **[a definir]**. Hasta que se defina, no los sumes.
 
-- **Sacá siempre:** silencios largos, muletillas ("eh", "bueno", "o sea"), arranques en falso, repeticiones y errores.
-- **Los jump cuts están permitidos:** son parte del lenguaje UGC.
-- **Cada 2 a 4 segundos tiene que cambiar algo en pantalla** **[validar]**: un corte, un acercamiento (zoom de 110 a 120 %), un plano de apoyo o un texto.
-- **Nunca cortes en medio de una palabra** ni dejes una frase sin terminar.
-- **No sobrecargues:** demasiados efectos y transiciones hacen que deje de parecer UGC.
+## Ritmo y cortes
+
+- **Ritmo rápido.**
+- **Sin transiciones:** solo cortes limpios. Nada de fundidos, barridos ni efectos entre planos.
+- **Zooms cuando alguien habla**, para darle movimiento a los planos fijos.
+- **B-roll intercalado sobre la voz:** mientras la persona habla, cubrí partes con material de apoyo que muestre lo que dice.
+
+## Qué se saca siempre
+
+- Silencios.
+- Muletillas.
+- Errores.
+- Repeticiones.
+- Todo lo que haga que el video se vuelva lento.
 
 ## Subtítulos
 
-- **Siempre**, salvo que la persona pida lo contrario.
-- **Fieles a lo que se dice.** Podés corregir errores evidentes de transcripción, pero no cambiar el sentido ni agregar promesas.
-- **Bloques cortos:** una o dos líneas, de 3 a 6 palabras por bloque.
-- **Legibles:** alto contraste con el fondo. Si la marca define tipografía y colores en su información, usalos.
-- **Respetá las zonas seguras:** dejá libre el 20 % inferior y el borde derecho de la pantalla, donde la plataforma pone botones y descripción.
+- **Siempre llevan subtítulos.**
+- **Estilo preferido: palabra por palabra** (como el efecto "cambiar" de CapCut), para que no haya mucho texto en pantalla a la vez.
+- **Alternativa: frase por frase**, pero solo con frases cortas.
+- **Posición:** centrados horizontalmente y **un poco por debajo del medio** de la pantalla. Ni en el centro, que es invasivo, ni abajo de todo, donde no se leen.
+- **Fieles a lo que se dice:** podés corregir errores evidentes de transcripción, pero no cambiar el sentido ni agregar promesas.
 
-## Textos en pantalla
+## Otros textos en pantalla
 
-- **Pocos y con función:** el gancho, un dato clave, el cierre.
-- **Datos, solo si están en la información de la marca.** No inventes precios, tiempos ni promociones; si el creador dice un dato que no figura, marcalo como advertencia para que alguien lo confirme.
-- **Una idea por texto**, grande, con la identidad visual de la marca.
+- Se pueden usar para **resaltar palabras específicas**.
+- Siempre **limpios y medidos**: no recargar la pantalla.
+- **Datos, solo si están en la información de la marca.** No inventes precios, tiempos ni promociones; si el creador dice un dato que no figura, marcalo como advertencia.
 
 ## Sonido
 
-- **La voz manda.** La música va bien por debajo, sin competir con lo que se dice.
-- **La música acompaña el tono de la marca**, no el gusto de quien edita.
-- **Cuidado con los sonidos en tendencia:** muchas cuentas de empresa no tienen licencia para usar cualquier música de la plataforma. Proponelos como sugerencia y marcalo como advertencia **[validar]**.
-- **Efectos de sonido, con medida:** solo para acompañar un corte o un texto importante.
+- **Música: sí se usa**, siempre de la **librería de CapCut y de libre uso**. Nunca música con derechos ni sonidos en tendencia que la cuenta no pueda usar.
+- **Volumen de la música respecto de la voz:** **[a definir]**. Hasta que se defina, la voz se tiene que entender siempre sin esfuerzo.
+- **Efectos de sonido: muy pocos.** Se pueden usar con moderación; el video no se tiene que "embarrar".
 
 ## Formato técnico
 
-- Vertical 9:16, 1080 × 1920 píxeles, 30 cuadros por segundo **[validar]**.
-- Si el material no es vertical, reencuadrá sin cortar caras ni el producto. Si no se puede, avisalo como advertencia.
+Vertical 9:16, 1080 × 1920 píxeles. Es el estándar de Reels y TikTok; la guía de la agencia no lo especifica.
 
 ## La marca manda
 
-Antes de editar, leé de la información de la marca:
+De la información de la marca tomá:
 
-- **Personalidad y tono:** define el ritmo, la música y el estilo de los textos.
-- **Identidad visual:** colores y tipografía de subtítulos y textos.
-- **Qué evitar:** son límites firmes. Si el material cruza uno (una promesa que no se puede cumplir, un estereotipo, una comparación con la competencia), no lo uses y explicalo en el plan.
+- **Personalidad y tono:** define cómo suena el cierre y qué música acompaña.
+- **Identidad visual:** colores y tipografía de los textos, si la marca los define. Qué cambia de un cliente a otro está **[a definir]**.
+- **Qué evitar:** son límites firmes. Si el material cruza uno, no lo uses y explicalo en el plan.
 
 ## Cuándo pedir aclaración
 
 En lugar de suponer, preguntá cuando:
 
 - no llegó ningún video, o el material no alcanza para una pieza (muy corto, sin audio, sin la persona);
-- hay dos ganchos posibles igual de buenos y cambian el sentido del video;
+- no podés saber si es una recomendación o un video de venta, y eso cambia el cierre;
 - el creador dice un dato que no está en la información de la marca y es central para el video.
 
 Si no sabés la red de destino, asumí Reels y decilo en el plan.
 
 ## Revisión antes de entregar el plan
 
-- [ ] El gancho está en los primeros 3 segundos y se cumple en el video.
-- [ ] No quedaron silencios, muletillas ni errores.
-- [ ] Los subtítulos dicen lo mismo que la persona y respetan las zonas seguras.
-- [ ] Ningún texto inventa datos que no estén en la información de la marca.
-- [ ] Nada del video cruza la lista de "qué evitar" de la marca.
-- [ ] Sigue pareciendo hecho por una persona.
+- [ ] Está claro el tipo de video y el cierre corresponde a ese tipo.
+- [ ] Hay gancho en los primeros 3 segundos, salvo que sea un video de venta o de b-roll.
+- [ ] Hay b-roll sobre la voz y no quedaron silencios, muletillas ni repeticiones.
+- [ ] No hay transiciones: solo cortes limpios.
+- [ ] Los subtítulos van palabra por palabra o en frases cortas, un poco por debajo del medio.
+- [ ] El llamado a la acción está y suena natural.
+- [ ] La música es de libre uso.
+- [ ] La duración está entre 10 segundos y 1:20, idealmente cerca del minuto.
+- [ ] Sigue pareciendo hecho por una persona, no un video de YouTube.
 
-## Pendiente de validar con el equipo de edición
+## Pendiente de definir con el equipo
 
-Cada punto sale de las preguntas que quedaron abiertas. Cuando estén las respuestas, se reemplaza el criterio general por el de Yourebrand.
-
-| Tema | Hoy dice | Pregunta |
-|---|---|---|
-| Material de entrada | Uno o varios clips | 1, 2 |
-| Duración por red | 15 a 35 s | 3 |
-| Gancho y estructura | Cuatro partes | 4, 5, 6 |
-| Ritmo | Cambio cada 2 a 4 s | 7, 8 |
-| Subtítulos y textos | Siempre, bloques cortos | 9, 10 |
-| Música y efectos | Voz primero, tendencias con cuidado | 11, 12 |
-| Qué cambia por cliente | Tono, colores y tipografía de la marca | 13 |
-| Correcciones frecuentes | (sin datos) | 14 |
-| Video de referencia | (sin datos) | 15 |
+| Tema | Mientras tanto |
+|---|---|
+| Logo o placa final | No se suman |
+| Volumen de la música respecto de la voz | La voz se entiende siempre sin esfuerzo |
+| Qué cambia de un cliente a otro (tipografía, colores, logo, tono) | Se toma de la información de cada marca |
+| Correcciones que más se repiten en la revisión | Sin datos |
+| Video de referencia "bien editado", sin datos reales de clientes | Sin datos |
