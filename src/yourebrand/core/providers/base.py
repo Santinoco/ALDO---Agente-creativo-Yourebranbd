@@ -3,6 +3,7 @@
 No importa ningún SDK: es lo que el resto del sistema conoce de un proveedor.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -22,6 +23,28 @@ class ProviderResult:
     stop_reason: str | None
     truncated: bool  # la respuesta se cortó por llegar a max_tokens
     refused: bool = False  # el modelo se negó a responder
+
+
+ImageMediaType = Literal["image/jpeg", "image/png"]
+
+
+@dataclass(frozen=True)
+class ImageInput:
+    """Una imagen que acompaña al prompt (por ejemplo, un fotograma de un video).
+
+    Va como bytes y no como ruta: el proveedor no lee archivos. Las imágenes
+    nunca entran al historial de la conversación, solo a una llamada puntual.
+    """
+
+    data: bytes
+    media_type: ImageMediaType = "image/jpeg"
+    # Texto que va justo antes de la imagen, para que el modelo sepa qué es
+    # (por ejemplo "Fotograma en 12.0 s"). Lo arma el código, no el usuario.
+    label: str | None = None
+    # Tamaño en píxeles, si se conoce: sirve para estimar los tokens antes de
+    # llamar (ver core/llm.py). Sin él, se estima el peor caso.
+    width: int | None = None
+    height: int | None = None
 
 
 class Message(BaseModel):
@@ -45,6 +68,10 @@ class Message(BaseModel):
     # (en Gemini, las firmas del razonamiento). Solo la entiende el proveedor
     # que la generó; los demás la ignoran y usan los campos neutrales.
     provider_raw: dict[str, Any] | None = None
+    # Qué proveedor generó provider_raw. Si una sesión cambia de proveedor, el
+    # nuevo ignora la respuesta original del otro y usa los campos neutrales.
+    # None en mensajes guardados antes de este campo: eran todos de Gemini.
+    provider: str | None = None
 
     @classmethod
     def user(cls, text: str) -> "Message":
@@ -54,6 +81,24 @@ class Message(BaseModel):
     def tool(cls, call: ToolCall, result: ToolResult) -> "Message":
         """Resultado de una tool, emparejado con el pedido que lo originó."""
         return cls(role="tool", tool_call_id=call.id, tool_name=call.tool_name, result=result)
+
+
+def tool_error_payload(result: ToolResult | None) -> dict[str, Any]:
+    """Lo que ve el modelo de una tool que falló: el mensaje y lo que hace falta para corregir el pedido.
+
+    Es una decisión del sistema, no de cada proveedor: todos mandan lo mismo y
+    solo cambian la forma. La metadata de runtime (latencia, intento) no va: al
+    modelo no le sirve y suma tokens.
+    """
+    if result is None:
+        return {"error": "la tool no devolvió resultado"}
+    payload = {
+        "error": result.content,
+        "error_type": result.metadata.get("error_type"),
+        # Qué argumento falló y por qué, cuando el error es de validación.
+        "details": result.metadata.get("details"),
+    }
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 @dataclass(frozen=True)
@@ -86,8 +131,12 @@ class LLMProvider(Protocol):
         max_tokens: int,
         timeout_seconds: float,
         output_schema: dict[str, Any] | None = None,
+        images: Sequence[ImageInput] = (),
     ) -> ProviderResult:
         """Genera texto. Con `output_schema` (JSON Schema estándar), el texto es un JSON con esa forma.
+
+        `images` van antes del prompt, cada una precedida por su `label`. Un
+        proveedor que no lee imágenes lanza InvalidRequestError si recibe alguna.
 
         Cómo se consigue esa forma es asunto de cada proveedor. Quien llama
         valida igual el resultado: el contrato no garantiza que el JSON cumpla.

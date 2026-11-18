@@ -213,10 +213,12 @@ def test_malformed_tool_call_is_flagged(provider):
     assert result.stop_reason == "MALFORMED_FUNCTION_CALL"
 
 
-def test_anthropic_does_not_support_tools_yet(monkeypatch):
-    monkeypatch.setattr(anthropic_provider, "Anthropic", lambda api_key, max_retries: None)
+def test_a_claude_message_is_rebuilt_from_neutral_fields(provider):
+    """Una sesión que pasa de Claude a Gemini: la respuesta original de Claude no le sirve a Gemini."""
+    claude_message = Message(role="model", text="hola", provider="anthropic",
+                             provider_raw={"content": [{"type": "text", "text": "hola"}]})
 
-    with pytest.raises(errors.ProviderConfigurationError):
-        AnthropicProvider("sk-test").generate_turn(
-            model="m", system="s", messages=[], tools=[], max_tokens=10, timeout_seconds=30
-        )
+    turn(provider, [Message.user("hola"), claude_message, Message.user("seguí")])
+
+    sent = provider._client.calls[0]["contents"][1]
+    assert sent.role == "model" and sent.parts[0].text == "hola"

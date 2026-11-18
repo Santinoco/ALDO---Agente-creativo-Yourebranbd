@@ -65,18 +65,23 @@ def call_with_retry[T](
     jitter: bool = True,
     on_retry: Callable[[RetryEvent], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    retry_timeouts: bool = True,
 ) -> tuple[T, int]:
     """Ejecuta `fn` y la reintenta ante fallas temporales. Devuelve el resultado y la cantidad de intentos.
 
     Solo se reintenta `TransientProviderError`: cualquier otro error se propaga
     en el primer intento, porque repetir la llamada daría el mismo resultado.
+
+    `retry_timeouts=False` no reintenta `ProviderTimeoutError`: cuando se corta
+    por tiempo, el modelo pudo haber generado (y cobrado) casi toda la respuesta,
+    y reintentar paga todo de nuevo. Un 429 o un 5xx, en cambio, no generaron nada.
     """
     attempt = 1
     while True:
         try:
             return fn(), attempt
         except TransientProviderError as exc:
-            if attempt > max_retries:
+            if attempt > max_retries or (not retry_timeouts and isinstance(exc, ProviderTimeoutError)):
                 raise
 
             retry_after = exc.retry_after_seconds if isinstance(exc, RateLimitError) else None

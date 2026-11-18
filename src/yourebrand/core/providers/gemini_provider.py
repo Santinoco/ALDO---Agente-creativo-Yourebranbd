@@ -2,6 +2,7 @@
 
 import re
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -17,7 +18,7 @@ from yourebrand.core.errors import (
     RateLimitError,
     TransientProviderError,
 )
-from yourebrand.core.providers.base import Message, ProviderResult, TurnResult
+from yourebrand.core.providers.base import ImageInput, Message, ProviderResult, TurnResult, tool_error_payload
 from yourebrand.core.reliability import call_with_deadline
 from yourebrand.core.tools import ToolCall, ToolResult
 
@@ -129,6 +130,7 @@ class GeminiProvider:
         max_tokens: int,
         timeout_seconds: float,
         output_schema: dict[str, Any] | None = None,
+        images: Sequence[ImageInput] = (),
     ) -> ProviderResult:
         config = _base_config(system=system, max_tokens=max_tokens, timeout_seconds=timeout_seconds)
         if output_schema is not None:
@@ -136,7 +138,7 @@ class GeminiProvider:
             # Pydantic, sin adaptarlo (a diferencia de response_schema).
             config.response_mime_type = "application/json"
             config.response_json_schema = output_schema
-        response = self._send(model=model, contents=prompt, config=config, timeout_seconds=timeout_seconds)
+        response = self._send(model=model, contents=_prompt_contents(prompt, images), config=config, timeout_seconds=timeout_seconds)
         usage = _usage_fields(response, requested_model=model)
         # response.text omite el razonamiento y es None si no hubo respuesta.
         return ProviderResult(text=response.text or "", **usage)
@@ -190,7 +192,7 @@ class GeminiProvider:
         self,
         *,
         model: str,
-        contents: str | list[genai_types.Content],
+        contents: str | list[genai_types.Content] | list[genai_types.Part],
         config: genai_types.GenerateContentConfig,
         timeout_seconds: float,
     ) -> genai_types.GenerateContentResponse:
@@ -256,6 +258,19 @@ def _usage_fields(response: genai_types.GenerateContentResponse, *, requested_mo
     }
 
 
+def _prompt_contents(prompt: str, images: Sequence[ImageInput]) -> str | list[genai_types.Part]:
+    """El prompt solo, o las imágenes (cada una con su rótulo) seguidas del prompt."""
+    if not images:
+        return prompt
+    parts: list[genai_types.Part] = []
+    for image in images:
+        if image.label:
+            parts.append(genai_types.Part(text=image.label))
+        parts.append(genai_types.Part.from_bytes(data=image.data, mime_type=image.media_type))
+    parts.append(genai_types.Part(text=prompt))
+    return parts
+
+
 def _to_gemini_contents(messages: list[Message]) -> list[genai_types.Content]:
     """Convierte el historial neutral al formato de Gemini."""
     contents: list[genai_types.Content] = []
@@ -284,7 +299,7 @@ def _to_gemini_contents(messages: list[Message]) -> list[genai_types.Content]:
         flush_results()
         if message.role == "user":
             contents.append(genai_types.Content(role="user", parts=[genai_types.Part(text=message.text or "")]))
-        elif message.provider_raw is not None:
+        elif message.provider_raw is not None and message.provider in (None, "gemini"):
             # La respuesta original, idéntica: así viajan de vuelta las firmas
             # del razonamiento, estén en la parte que estén.
             contents.append(genai_types.Content.model_validate(message.provider_raw))
@@ -306,22 +321,13 @@ def _to_gemini_contents(messages: list[Message]) -> list[genai_types.Content]:
 
 
 def _tool_response_payload(result: ToolResult | None) -> dict[str, Any]:
-    """Lo que ve el modelo de un ToolResult: el contenido, o el error con lo que hace falta para corregirlo.
+    """Un ToolResult en la forma de Gemini: un dict con el resultado o con el error.
 
-    La metadata de runtime (latencia, intento) no se manda: para el modelo es
-    ruido y suma tokens.
+    Qué se manda de un error lo decide el contrato (tool_error_payload).
     """
-    if result is None:
-        return {"error": "la tool no devolvió resultado"}
-    if result.ok:
+    if result is not None and result.ok:
         return {"result": result.content}
-    payload = {
-        "error": result.content,
-        "error_type": result.metadata.get("error_type"),
-        # Qué argumento falló y por qué, cuando el error es de validación.
-        "details": result.metadata.get("details"),
-    }
-    return {key: value for key, value in payload.items() if value is not None}
+    return tool_error_payload(result)
 
 
 def _message_from_response(response: genai_types.GenerateContentResponse) -> Message:
@@ -349,6 +355,7 @@ def _message_from_response(response: genai_types.GenerateContentResponse) -> Mes
         # mode="json": los bytes de las firmas quedan en base64 y el dict se puede
         # guardar como JSON (el checkpointer de la iteración 3) sin perderlas.
         provider_raw=content.model_dump(mode="json", exclude_none=True) if content else None,
+        provider="gemini",
     )
 
 

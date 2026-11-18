@@ -273,7 +273,7 @@ def test_gemini_error_message_does_not_carry_sdk_detail():
 def test_build_provider_builds_gemini():
     settings = SimpleNamespace(llm_provider="gemini", gemini_api_key=SecretStr("gm-test"), anthropic_api_key=None)
 
-    provider = build_provider(settings)
+    provider = build_provider(settings.llm_provider, settings)
 
     assert provider.name == "gemini"
     assert provider._client.api_key == "gm-test"
@@ -283,4 +283,4 @@ def test_build_provider_without_key_fails():
     settings = SimpleNamespace(llm_provider="gemini", gemini_api_key=None, anthropic_api_key=None)
 
     with pytest.raises(errors.ProviderConfigurationError):
-        build_provider(settings)
+        build_provider(settings.llm_provider, settings)

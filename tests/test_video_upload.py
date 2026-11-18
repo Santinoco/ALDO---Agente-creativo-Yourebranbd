@@ -167,7 +167,7 @@ def text_turn(text):
 @pytest.fixture
 def provider(monkeypatch):
     stub = ScriptedProvider()
-    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    monkeypatch.setattr(llm, "get_provider", lambda *args: stub)
     monkeypatch.setattr(
         llm,
         "get_settings",

@@ -189,7 +189,7 @@ def test_anthropic_error_message_does_not_carry_sdk_detail(fake_sdk):
 def test_build_provider_uses_configured_provider(fake_sdk):
     settings = SimpleNamespace(llm_provider="anthropic", anthropic_api_key=SecretStr("sk-test"))
 
-    provider = build_provider(settings)
+    provider = build_provider(settings.llm_provider, settings)
 
     assert provider.name == "anthropic"
     assert provider._client.api_key == "sk-test"

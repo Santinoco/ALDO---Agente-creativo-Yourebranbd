@@ -59,7 +59,7 @@ def provider(tmp_path, monkeypatch):
 
     stub = StubProvider()
     monkeypatch.setattr(tenancy, "get_settings", lambda: SimpleNamespace(data_dir=tmp_path))
-    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    monkeypatch.setattr(llm, "get_provider", lambda *args: stub)
     monkeypatch.setattr(
         llm,
         "get_settings",

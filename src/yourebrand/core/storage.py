@@ -5,6 +5,8 @@ Los videos viven en la máquina donde corre la app:
     <storage_dir>/<client_id>/videos/<video_id>/
         original.mp4    el archivo que subió la persona
         meta.json       sus datos (VideoRef)
+        prep/           lo que se deriva para el plan: fotogramas, audio,
+                        transcripción y pausas (ver core/video_prep.py)
 
 Toda ruta sale de un TenantContext validado y de un video_id con formato fijo:
 un id armado a mano no puede salir de la carpeta del cliente. Si más adelante
@@ -145,3 +147,61 @@ def video_file(tenant: TenantContext, video_id: str) -> Path:
     """Ruta del archivo original, para quien lo procese (fotogramas, audio, render)."""
     ref = get_video(tenant, video_id)
     return _video_dir(tenant, video_id) / f"original.{ref.container}"
+
+
+def prep_dir(tenant: TenantContext, video_id: str) -> Path:
+    """Carpeta de lo derivado de un video (fotogramas, audio, transcripción). La crea si falta."""
+    get_video(tenant, video_id)  # falla si el video no es de este cliente
+    folder = _video_dir(tenant, video_id) / "prep"
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+# --- Planes de edición y renders ---------------------------------------------
+#
+#     <storage_dir>/<client_id>/plans/<plan_id>.json     plan de edición guardado
+#     <storage_dir>/<client_id>/renders/<render_id>/     un render: estado,
+#                                                        subtítulos y video final
+#
+# Los ids tienen formato fijo, igual que los de video: no se puede armar uno que
+# salga de la carpeta del cliente, y el de otro cliente no existe acá.
+
+PLAN_ID_PATTERN = re.compile(r"plan-[0-9a-f]{12}")
+RENDER_ID_PATTERN = re.compile(r"render-[0-9a-f]{12}")
+
+
+class UnknownPlanError(VideoStorageError, LookupError):
+    """No hay un plan de edición con ese id para este cliente."""
+
+
+class UnknownRenderError(VideoStorageError, LookupError):
+    """No hay un render con ese id para este cliente."""
+
+
+def new_plan_id() -> str:
+    return f"plan-{uuid.uuid4().hex[:12]}"
+
+
+def new_render_id() -> str:
+    return f"render-{uuid.uuid4().hex[:12]}"
+
+
+def plan_path(tenant: TenantContext, plan_id: str) -> Path:
+    """Ruta del archivo de un plan. La carpeta se crea si falta; el archivo puede no existir."""
+    if not PLAN_ID_PATTERN.fullmatch(plan_id):
+        raise UnknownPlanError("id de plan inválido")
+    folder = get_settings().storage_dir / tenant.client_id / "plans"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"{plan_id}.json"
+
+
+def render_dir(tenant: TenantContext, render_id: str, *, create: bool = False) -> Path:
+    """Carpeta de un render. Con `create`, la crea; si no, falla si no existe."""
+    if not RENDER_ID_PATTERN.fullmatch(render_id):
+        raise UnknownRenderError("id de render inválido")
+    folder = get_settings().storage_dir / tenant.client_id / "renders" / render_id
+    if create:
+        folder.mkdir(parents=True, exist_ok=False)
+    elif not folder.is_dir():
+        raise UnknownRenderError(f"no hay un render {render_id!r} para este cliente")
+    return folder

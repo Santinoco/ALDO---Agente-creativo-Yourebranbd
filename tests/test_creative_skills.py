@@ -157,13 +157,13 @@ def test_agent_prompt_without_skills_has_no_skills_section():
 
 
 def run_load_skill(arguments):
-    registry = build_creative_registry(generation_timeout_s=5)
+    registry = build_creative_registry(generation_timeout_s=5, video_edit=False)
     context = ExecutionContext(tenant=TenantContext("acme"), run_id="run-1")
     return registry.run(ToolCall(id="c1", tool_name="load_skill", arguments=arguments), context)
 
 
 def test_load_skill_declaration_lists_names_as_enum():
-    registry = build_creative_registry(generation_timeout_s=5)
+    registry = build_creative_registry(generation_timeout_s=5, video_edit=False)
     declaration = {d["name"]: d for d in registry.function_declarations()}["load_skill"]
 
     assert declaration["parameters"]["properties"]["name"]["enum"] == list(available_skills())

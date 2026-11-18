@@ -20,7 +20,7 @@ from yourebrand.creative.tools import IDEAS_METADATA_KEY, NO_POSTS_MESSAGE, buil
 
 def make_registry():
     # Plazo fijo: los tests no dependen del .env.
-    return build_creative_registry(generation_timeout_s=5)
+    return build_creative_registry(generation_timeout_s=5, video_edit=False)
 
 
 def idea_json(number):
@@ -66,7 +66,7 @@ def data_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def provider(monkeypatch):
     stub = StubProvider()
-    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    monkeypatch.setattr(llm, "get_provider", lambda *args: stub)
     monkeypatch.setattr(
         llm,
         "get_settings",

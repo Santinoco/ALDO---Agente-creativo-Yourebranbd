@@ -16,14 +16,19 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, create_model, field_validator
 
 from yourebrand.core.config import get_settings
-from yourebrand.core.errors import LLMError
+from yourebrand.core.errors import BudgetExceededError, LLMError
 from yourebrand.core.reliability import validate_user_text
 from yourebrand.core.tools import ExecutionContext, Tool, ToolRegistry, ToolResult, model_usage_metadata
 from yourebrand.core.trace import emit
 from yourebrand.creative.context import MissingBrandError, load_brand, load_previous_posts
 from yourebrand.creative.ideas import MAX_IDEAS, NotEnoughIdeasError, generate_ideas_with_usage
 from yourebrand.creative.schemas import ContentType, GeneratedIdea
+from yourebrand.core.media import MediaError
+from yourebrand.core.storage import VIDEO_ID_PATTERN, UnknownVideoError
+from yourebrand.core.transcription import TranscriptionFailedError, TranscriptionUnavailableError
+from yourebrand.core.video_prep import prepare_video
 from yourebrand.creative.skills import Skill, available_skills, get_skill
+from yourebrand.creative.video_edit import InvalidPlanError, plan_video_edit
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +161,103 @@ def generate_ideas_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResu
     )
 
 
+# Clave de la metadata donde plan_video_edit deja el plan completo, para la
+# aprobación y el render. Al modelo le vuelve solo un resumen.
+VIDEO_PLAN_METADATA_KEY = "video_plan"
+MAX_VIDEO_NOTES_CHARS = 1000
+# Preparar (Whisper en CPU) puede tardar minutos con un video de 2 minutos.
+VIDEO_PREP_TIMEOUT_S = 900
+
+
+class PlanVideoEditArgs(BaseModel):
+    video_id: str = Field(
+        pattern=VIDEO_ID_PATTERN.pattern,
+        description="Id del video adjunto que hay que editar, tal como figura en el mensaje (vid-...).",
+    )
+    notes: str | None = Field(
+        default=None,
+        max_length=MAX_VIDEO_NOTES_CHARS,
+        description="Indicaciones de la persona para esta edición, si dio alguna: tipo de video, red, "
+        "qué destacar o qué sacar. Omitilo si no dio ninguna.",
+    )
+
+    @field_validator("notes")
+    @classmethod
+    def _validate_notes(cls, value: str | None) -> str | None:
+        return None if value is None else validate_user_text(value, max_len=MAX_VIDEO_NOTES_CHARS)
+
+
+def _plan_summary(video_id: str, plan: Any) -> dict[str, Any]:
+    """Lo que vuelve al historial: lo necesario para presentar el plan, sin el detalle del render."""
+    return {
+        "video_id": video_id,
+        "tipo": plan.video_type,
+        "gancho": plan.hook,
+        "duracion_estimada_s": plan.duration_s,
+        "tramos": [
+            {"de_s": seg.start_s, "a_s": seg.end_s, "para": seg.purpose, "b_roll": len(seg.b_roll)}
+            for seg in plan.segments
+        ],
+        "subtitulos": plan.subtitle_style,
+        "textos_en_pantalla": [t.text for t in plan.on_screen_texts],
+        "musica": plan.music,
+        "cierre": plan.call_to_action,
+        "red": plan.target_network,
+        "advertencias": plan.warnings,
+    }
+
+
+def plan_video_edit_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResult:
+    """Prepara el video del cliente de la sesión y le pide el plan de edición a Claude."""
+    video_id = args["video_id"]
+    try:
+        prep = prepare_video(ctx.tenant, video_id)
+    except UnknownVideoError:
+        # Mismo mensaje si no existe o es de otro cliente: no se revela cuál.
+        return ToolResult(ok=False, content=f"No hay un video {video_id} en esta sesión. Revisá el id.",
+                          metadata={"error_type": "unknown_video"})
+    except (MediaError, TranscriptionUnavailableError, TranscriptionFailedError) as exc:
+        return ToolResult(
+            ok=False,
+            content=f"No se pudo preparar el video ({exc}). Avisale a la persona: no es un problema del pedido.",
+            metadata={"error_type": type(exc).__name__},
+        )
+    try:
+        generation = plan_video_edit(ctx.tenant, prep, run_id=ctx.run_id, notes=args.get("notes"))
+    except MissingBrandError:
+        return ToolResult(ok=False, content="La marca no tiene información cargada: no se puede editar.",
+                          metadata={"error_type": "missing_brand"})
+    except BudgetExceededError:
+        return ToolResult(
+            ok=False,
+            content="El video es demasiado largo para armar el plan dentro del tope de gasto configurado, "
+            "y no se llamó al modelo. No lo reintentes: avisale a la persona (puede subir un video más corto).",
+            metadata={"error_type": "BudgetExceededError"},
+        )
+    except LLMError as exc:
+        metadata: dict[str, Any] = {"error_type": type(exc).__name__}
+        if isinstance(exc, InvalidPlanError):
+            metadata |= model_usage_metadata(exc.usage.input_tokens, exc.usage.output_tokens)
+        return ToolResult(
+            ok=False,
+            content=f"No se pudo armar el plan de edición ({type(exc).__name__}). "
+            "Podés intentar de nuevo una vez o avisarle a la persona.",
+            metadata=metadata,
+        )
+
+    plan = generation.plan
+    return ToolResult(
+        ok=True,
+        content=json.dumps(_plan_summary(video_id, plan), ensure_ascii=False),
+        metadata={
+            VIDEO_PLAN_METADATA_KEY: {"video_id": video_id, **plan.model_dump()},
+            "frames": len(prep.frames),
+            "words": len(prep.transcript.words),
+            **model_usage_metadata(generation.usage.input_tokens, generation.usage.output_tokens),
+        },
+    )
+
+
 def load_skill_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResult:
     """Criterio completo de una skill. El nombre ya viene validado contra las skills que existen."""
     skill = get_skill(args["name"])
@@ -199,14 +301,28 @@ def _generation_timeout_s() -> float:
     return settings.llm_timeout_seconds * attempts + max_backoff_s * settings.llm_max_retries + 5
 
 
-def build_creative_registry(*, generation_timeout_s: float | None = None) -> ToolRegistry:
+def build_creative_registry(
+    *,
+    generation_timeout_s: float | None = None,
+    video_edit: bool | None = None,
+    video_edit_timeout_s: float | None = None,
+    video_edit_max_calls: int | None = None,
+) -> ToolRegistry:
     """Registry con todas las tools del Agente Creativo.
 
-    `generation_timeout_s` se calcula de la configuración si no se pasa; los
-    tests lo pasan para no depender del `.env`.
+    `generation_timeout_s` se calcula de la configuración si no se pasa, y
+    `video_edit` (si se registra plan_video_edit) sale de MODEL_VIDEO_EDIT; los
+    tests los pasan para no depender del `.env`.
     """
     if generation_timeout_s is None:
         generation_timeout_s = _generation_timeout_s()
+    if video_edit is None:
+        video_edit = get_settings().model_video_edit is not None
+    if video_edit:
+        if video_edit_timeout_s is None or video_edit_max_calls is None:
+            settings = get_settings()
+            video_edit_timeout_s = video_edit_timeout_s or settings.video_edit_timeout_seconds + 30
+            video_edit_max_calls = video_edit_max_calls or settings.video_edit_max_calls_per_turn
     registry = ToolRegistry()
     registry.register(
         Tool(
@@ -251,6 +367,26 @@ def build_creative_registry(*, generation_timeout_s: float | None = None) -> Too
             retries=0,
         )
     )
+    if video_edit:
+        registry.register(
+            Tool(
+                name="plan_video_edit",
+                description=(
+                    "Arma el plan de edición de un video UGC adjunto: tipo de video, gancho, tramos con sus "
+                    "tiempos, b-roll, subtítulos, textos, música, cierre y advertencias. No edita el video: "
+                    "devuelve un plan para que la persona lo apruebe. Usala cuando la persona adjuntó un "
+                    "video y pide editarlo. Si no hay video adjunto, pedile que lo suba. Puede tardar unos "
+                    "minutos: avisale. Presentale el plan resumido y las advertencias."
+                ),
+                kind="compute",
+                fn=plan_video_edit_tool,
+                args_model=PlanVideoEditArgs,
+                timeout_s=VIDEO_PREP_TIMEOUT_S + video_edit_timeout_s,
+                retries=0,
+                # Opus es la llamada cara: un bucle del modelo no puede multiplicarla.
+                max_calls_per_run=video_edit_max_calls,
+            )
+        )
     skills = list(available_skills().values())
     if skills:
         registry.register(

@@ -45,7 +45,7 @@ class StubProvider:
 def provider(monkeypatch):
     """Los tests nunca llaman a una API real ni leen la configuración real."""
     stub = StubProvider()
-    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    monkeypatch.setattr(llm, "get_provider", lambda *args: stub)
     monkeypatch.setattr(
         llm,
         "get_settings",
@@ -291,7 +291,7 @@ class StubTurnProvider:
 def turn_provider(provider, monkeypatch):
     # Reusa la configuración falsa de `provider` y cambia solo el proveedor.
     stub = StubTurnProvider()
-    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    monkeypatch.setattr(llm, "get_provider", lambda *args: stub)
     return stub
 
 

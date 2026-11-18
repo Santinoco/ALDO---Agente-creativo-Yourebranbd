@@ -64,7 +64,7 @@ class EchoArgs(BaseModel):
 def provider(monkeypatch):
     """El grafo usa el core/llm.py real; solo se reemplaza el proveedor y la configuración."""
     stub = ScriptedProvider()
-    monkeypatch.setattr(llm, "get_provider", lambda: stub)
+    monkeypatch.setattr(llm, "get_provider", lambda *args: stub)
     monkeypatch.setattr(
         llm,
         "get_settings",

@@ -19,6 +19,7 @@ OPTIONAL = [
     "SUPABASE_URL",
     "SUPABASE_KEY",
     "NOTION_API_KEY",
+    "MODEL_VIDEO_EDIT",
 ]
 
 
@@ -91,6 +92,45 @@ def test_empty_key_counts_as_missing(clean_env):
         load()
 
     assert "ANTHROPIC_API_KEY" in str(error.value)
+
+
+def test_video_edit_is_disabled_by_default(clean_env):
+    for name, value in REQUIRED.items():
+        clean_env.setenv(name, value)
+
+    assert load().model_video_edit is None
+
+
+def test_empty_video_edit_model_counts_as_disabled(clean_env):
+    # Así queda al copiar .env.example: la app arranca solo con Gemini.
+    for name, value in REQUIRED.items():
+        clean_env.setenv(name, value)
+    clean_env.setenv("MODEL_VIDEO_EDIT", "")
+
+    assert load().model_video_edit is None
+
+
+def test_video_edit_requires_claude_key_even_with_gemini(clean_env):
+    for name, value in REQUIRED.items():
+        clean_env.setenv(name, value)
+    clean_env.setenv("MODEL_VIDEO_EDIT", "claude-opus-5-5")
+
+    with pytest.raises(ValidationError) as error:
+        load()
+
+    assert "MODEL_VIDEO_EDIT requiere ANTHROPIC_API_KEY" in str(error.value)
+
+
+def test_video_edit_with_claude_key_and_gemini_conversation(clean_env):
+    for name, value in REQUIRED.items():
+        clean_env.setenv(name, value)
+    clean_env.setenv("MODEL_VIDEO_EDIT", "claude-opus-5-5")
+    clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    settings = load()
+
+    assert settings.llm_provider == "gemini"
+    assert settings.model_video_edit == "claude-opus-5-5"
 
 
 def test_unknown_provider_fails(clean_env):

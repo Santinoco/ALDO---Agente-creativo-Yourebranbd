@@ -34,6 +34,10 @@ class ProviderTimeoutError(TransientProviderError):
     """La llamada superó el tiempo máximo permitido."""
 
 
+class BudgetExceededError(LLMError):
+    """El pedido supera el tope de tokens de entrada: se corta antes de llamar, sin gastar."""
+
+
 class LLMOutputError(LLMError):
     """La llamada terminó pero su salida no se puede usar."""
 

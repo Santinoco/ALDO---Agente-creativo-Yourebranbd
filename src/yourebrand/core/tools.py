@@ -9,7 +9,9 @@ Sigue el runtime del curso, con tres cambios:
 
 import logging
 from collections.abc import Callable
+from collections import OrderedDict
 from dataclasses import dataclass
+from threading import Lock
 from time import perf_counter, sleep
 from typing import Any, Literal, get_args
 
@@ -42,6 +44,9 @@ class ExecutionContext:
 
     tenant: TenantContext
     run_id: str
+    # Lo pone el grafo, nunca el modelo: True solo cuando una persona aprobó
+    # este pedido en la pausa. Una tool con requires_approval no corre sin esto.
+    approved: bool = False
 
 
 class ToolCall(BaseModel):
@@ -105,6 +110,8 @@ class Tool:
         *,  # lo que sigue solo se puede pasar por nombre: backoff_s=0.1
         backoff_s: float = 0.05,
         idempotent: bool = True,
+        max_calls_per_run: int | None = None,
+        requires_approval: bool = False,
     ) -> None:
         # Se valida al crear la tool, cuando arranca el programa, y no al
         # ejecutarla: una tool mal configurada falla enseguida y no en medio
@@ -130,6 +137,14 @@ class Tool:
         self.retries = retries
         self.backoff_s = backoff_s
         self.idempotent = idempotent
+        # Tope de ejecuciones en un mismo run (un mensaje de la persona). Para
+        # tools caras: si el modelo entra en un bucle, el costo queda acotado.
+        if max_calls_per_run is not None and max_calls_per_run < 1:
+            raise ValueError(f"{name}: max_calls_per_run debe ser al menos 1")
+        self.max_calls_per_run = max_calls_per_run
+        # Human-in-the-loop: el grafo pausa antes de ejecutarla y espera la
+        # decisión de una persona. El runtime la bloquea si llega sin aprobación.
+        self.requires_approval = requires_approval
 
     def function_declaration(self) -> dict[str, Any]:
         """Lo que ve el modelo: nombre, descripción y schema de argumentos.
@@ -177,6 +192,15 @@ class ToolRegistry:
         # Indexadas por nombre: el modelo pide "generate_ideas" y se encuentra
         # la tool en un paso, sin recorrer una lista.
         self.tools: dict[str, Tool] = {}
+        # Ejecuciones por (run_id, tool), para max_calls_per_run. Acotado: solo
+        # importan los runs recientes. El lock cubre tools que corren en paralelo.
+        self._calls: OrderedDict[tuple[str, str], int] = OrderedDict()
+        self._calls_lock = Lock()
+
+    def requires_approval(self, tool_name: str) -> bool:
+        """Si el pedido a esta tool tiene que pausar para que una persona lo apruebe."""
+        tool = self.tools.get(tool_name)
+        return tool is not None and tool.requires_approval
 
     def register(self, tool: Tool) -> None:
         # Dos tools con el mismo nombre: la segunda pisaría a la primera sin avisar.
@@ -195,6 +219,21 @@ class ToolRegistry:
     def function_declarations(self, allowed_kinds: set[str] | None = None) -> list[dict[str, Any]]:
         # Una declaración por tool visible: es la lista que se le manda al modelo.
         return [tool.function_declaration() for tool in self.available_tools(allowed_kinds)]
+
+    _MAX_TRACKED_CALLS = 1000
+
+    def _take_call(self, run_id: str, tool: "Tool") -> bool:
+        """Suma una ejecución de `tool` en `run_id`. False si ya llegó al tope."""
+        key = (run_id, tool.name)
+        with self._calls_lock:
+            used = self._calls.get(key, 0)
+            if used >= (tool.max_calls_per_run or 0):
+                return False
+            self._calls[key] = used + 1
+            self._calls.move_to_end(key)
+            while len(self._calls) > self._MAX_TRACKED_CALLS:
+                self._calls.popitem(last=False)
+            return True
 
     def run(
         self,
@@ -257,6 +296,15 @@ class ToolRegistry:
                 metadata={"error_type": "forbidden_tool", "kind": tool.kind},
             )
 
+        # 2b. Aprobación: si la tool la exige y el contexto no la trae, no corre.
+        # El grafo ya pausa antes; esto cubre cualquier otro camino de ejecución.
+        if tool.requires_approval and not context.approved:
+            return ToolResult(
+                ok=False,
+                content=f"{tool.name} necesita la aprobación de una persona antes de ejecutarse.",
+                metadata={"error_type": "approval_required"},
+            )
+
         # 3. Validación: lo que manda el modelo es un dict sin garantías.
         # model_validate lo controla contra el modelo Pydantic (tipos,
         # obligatorios, largos) y model_dump lo vuelve a convertir en dict, ya
@@ -276,6 +324,16 @@ class ToolRegistry:
                 ok=False,
                 content="Argumentos inválidos",
                 metadata={"error_type": "validation_error", "details": exc.errors(include_url=False)},
+            )
+
+        # 3b. Tope por run: se cuenta antes de ejecutar, así un pedido que
+        # falla también consume su lugar (puede haber gastado igual).
+        if tool.max_calls_per_run is not None and not self._take_call(context.run_id, tool):
+            return ToolResult(
+                ok=False,
+                content=f"Ya se usó {tool.name} {tool.max_calls_per_run} veces en este mensaje: no se vuelve "
+                "a ejecutar. Contale a la persona qué pasó y esperá su próximo mensaje.",
+                metadata={"error_type": "call_limit", "max_calls_per_run": tool.max_calls_per_run},
             )
 
         # 4. Ejecución. Solo RetryableToolError habilita otro intento.
