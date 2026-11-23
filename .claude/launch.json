@@ -7,7 +7,7 @@
       "runtimeArgs": [
         "-NoProfile",
         "-Command",
-        "$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); & .venv/Scripts/python.exe -m uvicorn yourebrand.api.app:app --port 8001"
+        "$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'); $py = if (Test-Path .venv/Scripts/python.exe) { '.venv/Scripts/python.exe' } else { 'venv/Scripts/python.exe' }; & $py -m uvicorn yourebrand.api.app:app --port 8001"
       ],
       "port": 8001,
       "autoPort": false

@@ -98,6 +98,22 @@
   .ok { color: var(--ok); } .bad { color: var(--err); } .warn { color: var(--warn); }
   .turn-foot { padding: 7px 10px; border-top: 1px solid var(--line); font: 12px var(--mono); color: var(--muted); }
 
+  /* Pausa de aprobación y render: tarjetas en el chat, del ancho de un mensaje. */
+  .card { align-self: stretch; max-width: 760px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card.approval { border-color: var(--warn); }
+  .card h3 { margin: 0 0 4px; font-size: 15px; }
+  .card .sub { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .card dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 10px; font-size: 14px; }
+  .card dt { color: var(--muted); }
+  .card dd { margin: 0; }
+  .card ol { margin: 0; padding-left: 20px; }
+  .card .warnings { color: var(--warn); font-size: 13px; margin: 0 0 10px; padding-left: 18px; }
+  .card textarea { width: 100%; height: 60px; margin: 4px 0 10px; }
+  .card .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .card .resolved { font-size: 14px; color: var(--muted); }
+  .card video { display: block; width: 100%; max-width: 320px; max-height: 70vh; border-radius: 10px; background: #000; margin: 6px 0 8px; }
+  .card pre { font: 12px var(--mono); white-space: pre-wrap; margin: 0 0 10px; }
+
   @media (max-width: 900px) {
     .app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 40vh; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
@@ -135,7 +151,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 // pendingVideos: videos ya subidos que viajan con el próximo mensaje.
-const state = { threadId: null, turn: 0, busy: false, uploading: false, pendingVideos: [] };
+// paused: el agente espera una aprobación; hasta resolverla no se envían mensajes.
+const state = { threadId: null, turn: 0, busy: false, uploading: false, paused: false, pendingVideos: [] };
 
 // Todo texto pasa por escape antes de entrar al HTML: las respuestas vienen del
 // modelo y no se confía en ellas.
@@ -208,6 +225,10 @@ const ERROR_LABELS = {
   validation_error: "Argumentos inválidos",
   unknown_tool: "El modelo pidió una tool que no existe",
   timeout: "La tool superó su tiempo máximo",
+  rejected_by_user: "La persona lo rechazó",
+  approval_required: "Faltaba la aprobación de una persona",
+  invalid_approval_request: "Pedido inválido: no había nada que aprobar",
+  unknown_plan: "El plan pedido no existe",
 };
 const errorLabel = (type) => ERROR_LABELS[type] ?? type ?? "error desconocido";
 
@@ -253,7 +274,8 @@ function describeEvent(e) {
       return ['<span class="warn">!</span>', "Pedido de tool mal armado",
         f.will_retry ? "se le da otra oportunidad al modelo" : "sin más intentos: se responde con un mensaje fijo"];
     case "route": {
-      const where = { run_tools: "ejecutar tools", step_limit: "tope de pasos", __end__: "fin del turno" }[f.to] ?? f.to;
+      const where = { run_tools: "ejecutar tools", await_approval: "pausa para aprobar", step_limit: "tope de pasos",
+        __end__: "fin del turno" }[f.to] ?? f.to;
       return ["→", `Grafo → ${where}`, `${escapeHtml(f.reason)} · paso ${f.step} de ${f.max_steps}`];
     }
     case "tool_start":
@@ -284,6 +306,23 @@ function describeEvent(e) {
         `${f.steps} de ${f.max_steps} · no se ejecutó: ${f.not_executed.map(escapeHtml).join(", ")}`];
     case "turn_end":
       return ["■", "Fin del turno", `${f.steps} llamada(s) del agente · tools: ${f.tools_called.length ? f.tools_called.map(escapeHtml).join(", ") : "ninguna"}`];
+    case "plan_stored":
+      return ["📝", `Plan guardado ${code(f.plan_id)}`, `video ${escapeHtml(f.video_id)} · ${f.segments} tramo(s)`];
+    case "approval_requested":
+      return ['<span class="warn">⏸</span>', `Pausa: espera la aprobación de ${f.tools.map(code).join(", ")}`,
+        "el grafo se detuvo antes de ejecutar; nada corre sin la decisión de la persona"];
+    case "turn_paused":
+      return ['<span class="warn">⏸</span>', "Turno en pausa", `${f.steps} llamada(s) del agente hasta acá`];
+    case "turn_resumed":
+      return ["▸", "Turno retomado", f.approved ? "la persona aprobó" : `la persona rechazó${f.has_comment ? " con un comentario" : ""}`];
+    case "approval_resolved":
+      return [f.approved ? '<span class="ok">✓</span>' : '<span class="bad">✗</span>',
+        `${f.approved ? "Aprobado" : "Rechazado"}: ${f.tools.map(code).join(", ")}`,
+        f.has_comment ? "con comentario para el agente" : ""];
+    case "tool_skipped":
+      return ['<span class="bad">✗</span>', `${code(f.tool)} no se ejecutó`, escapeHtml(errorLabel(f.error_type))];
+    case "render_queued":
+      return ["🎞", `Render en cola ${code(f.render_id)}`, `plan ${escapeHtml(f.plan_id)} · ${f.segments} tramo(s) · sigue en segundo plano`];
     default: {
       const shown = Object.entries(f).filter(([k]) => k !== "run_id" && k !== "client_id");
       return ["·", escapeHtml(e.event), escapeHtml(shown.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" "))];
@@ -368,6 +407,7 @@ async function newSession({ keepChat = false } = {}) {
   const session = await api("/sessions", { client_id: clientId });
   state.threadId = session.thread_id;
   state.turn = 0;
+  state.paused = false;
   // Los videos se guardan por cliente: los pendientes no pasan a otra conversación.
   state.pendingVideos = [];
   renderAttachments();
@@ -387,10 +427,149 @@ function setBusy(busy) {
 
 // Mientras sube un video no se puede enviar: el mensaje tiene que llevar su id.
 function refreshControls() {
-  $("send").disabled = state.busy || state.uploading;
-  $("text").disabled = state.busy;
-  $("video-input").disabled = state.busy || state.uploading;
-  document.querySelector(".attach").classList.toggle("disabled", state.busy || state.uploading);
+  const blocked = state.busy || state.paused;
+  $("send").disabled = blocked || state.uploading;
+  $("text").disabled = blocked;
+  $("text").placeholder = state.paused ? "Primero aprobá o rechazá el plan de arriba…" : "Escribí tu pedido…";
+  $("video-input").disabled = blocked || state.uploading;
+  document.querySelector(".attach").classList.toggle("disabled", blocked || state.uploading);
+  for (const button of document.querySelectorAll(".card.approval button")) button.disabled = state.busy;
+}
+
+// --- Pausa de aprobación -----------------------------------------------------
+
+// Vista previa de render_video: el plan guardado, tal como lo va a usar el render.
+function planHtml(plan) {
+  const seconds = (s) => `${Number(s).toFixed(1)} s`;
+  const row = (label, value) => value ? `<dt>${label}</dt><dd>${value}</dd>` : "";
+  const segments = (plan.tramos ?? []).map((t) =>
+    `<li>${seconds(t.de_s)} → ${seconds(t.a_s)} · ${escapeHtml(t.para)}${t.b_roll ? ` · ${t.b_roll} b-roll` : ""}</li>`).join("");
+  return `<dl>
+      ${row("Tipo", escapeHtml(plan.tipo ?? ""))}
+      ${row("Gancho", escapeHtml(plan.gancho ?? ""))}
+      ${row("Duración", plan.duracion_estimada_s != null ? `${formatDuration(plan.duracion_estimada_s)} (${seconds(plan.duracion_estimada_s)})` : "")}
+      ${row("Tramos", segments ? `<ol>${segments}</ol>` : "")}
+      ${row("Subtítulos", plan.subtitulos === "palabra" ? "palabra por palabra" : escapeHtml(plan.subtitulos ?? ""))}
+      ${row("Textos", (plan.textos_en_pantalla ?? []).map(escapeHtml).join(" · "))}
+      ${row("Música", escapeHtml(plan.musica ?? ""))}
+      ${row("Cierre", escapeHtml(plan.cierre ?? ""))}
+      ${row("Red", escapeHtml(plan.red ?? ""))}
+    </dl>
+    ${plan.advertencias?.length ? `<ul class="warnings">${plan.advertencias.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul>` : ""}`;
+}
+
+function addApprovalCard(requests) {
+  state.paused = true;
+  const card = document.createElement("div");
+  card.className = "card approval";
+  const isRender = requests.every((r) => r.tool === "render_video");
+  card.innerHTML = `
+    <h3>${isRender ? "Aprobá el plan de edición" : "Aprobá lo que va a hacer el agente"}</h3>
+    <p class="sub">El agente está en pausa: no se ejecuta nada hasta que decidas.</p>
+    ${requests.map((r) => r.tool === "render_video" ? planHtml(r.preview)
+      : `<p>${code(r.tool)}</p><pre>${escapeHtml(JSON.stringify(r.preview ?? r.arguments, null, 2))}</pre>`).join("")}
+    <label class="sub" for="approval-comment">Si lo rechazás, contale al agente qué cambiar:</label>
+    <textarea id="approval-comment" placeholder="Por ejemplo: empezá por la parte del precio y sacá el último tramo"></textarea>
+    <div class="actions">
+      <button class="primary" type="button" data-decision="approve">${isRender ? "Aprobar y renderizar" : "Aprobar"}</button>
+      <button type="button" data-decision="reject">Rechazar</button>
+    </div>`;
+  card.addEventListener("click", (event) => {
+    const decision = event.target.dataset?.decision;
+    if (!decision || state.busy) return;
+    const comment = card.querySelector("textarea").value.trim();
+    resolveApproval(card, decision === "approve", comment);
+  });
+  addToChat(card);
+  refreshControls();
+}
+
+async function resolveApproval(card, approved, comment) {
+  const ok = await runTurn(`/sessions/${state.threadId}/approval`, { approved, comment: comment || null });
+  if (!ok) return;  // la tarjeta queda para volver a intentarlo
+  card.querySelector("textarea").remove();
+  card.querySelector("label").remove();
+  card.querySelector(".actions").outerHTML = `<p class="resolved">${approved ? "✓ Aprobado" : "✗ Rechazado"}` +
+    `${comment ? `: «${escapeHtml(comment)}»` : ""}</p>`;
+  card.classList.remove("approval");
+}
+
+// --- Render en segundo plano ---------------------------------------------------
+
+const RENDER_POLL_MS = 2000;
+
+function addRenderCard(render) {
+  const card = document.createElement("div");
+  card.className = "card";
+  addToChat(card);
+  const started = performance.now();
+  const paint = (status) => {
+    const warnings = status.warnings?.length
+      ? `<ul class="warnings">${status.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul>` : "";
+    const base = `/sessions/${state.threadId}/renders/${encodeURIComponent(status.render_id)}`;
+    if (status.state === "done") {
+      card.innerHTML = `<h3>Video editado</h3>
+        <p class="sub">${code(status.render_id)} · ${formatDuration(status.duration_s)}</p>
+        <video controls playsinline src="${base}/video"></video>${warnings}
+        <div class="actions"><a href="${base}/video" download="${escapeHtml(status.render_id)}.mp4"><button type="button">Descargar</button></a></div>`;
+    } else if (status.state === "failed") {
+      card.innerHTML = `<h3 class="bad">El render falló</h3><p class="sub">${code(status.render_id)}</p>
+        <p>${escapeHtml(status.error ?? "sin detalle")}</p>`;
+    } else {
+      const elapsed = Math.round((performance.now() - started) / 1000);
+      card.innerHTML = `<h3>Renderizando el video…</h3>
+        <p class="sub">${code(status.render_id)} · ${status.state === "queued" ? "en cola" : "en curso"} · ${elapsed} s. ` +
+        `Podés seguir conversando mientras tanto.</p>${warnings}`;
+    }
+  };
+  paint(render);
+  const poll = async () => {
+    // threadId fijo: si se abre otra conversación, este render ya no se sigue.
+    const threadId = state.threadId;
+    try {
+      const status = await api(`/sessions/${threadId}/renders/${encodeURIComponent(render.render_id)}`);
+      if (threadId !== state.threadId) return;
+      paint(status);
+      if (status.state === "queued" || status.state === "running") setTimeout(poll, RENDER_POLL_MS);
+    } catch (error) {
+      card.innerHTML = `<h3 class="bad">No se pudo consultar el render</h3><p>${escapeHtml(error.message)}</p>`;
+    }
+  };
+  setTimeout(poll, RENDER_POLL_MS);
+}
+
+// --- Turnos --------------------------------------------------------------------
+
+// Corre un turno (mensaje nuevo o aprobación) y muestra lo que devuelve. false si falló.
+async function runTurn(path, body, { onError } = {}) {
+  setBusy(true);
+  const thinking = document.createElement("div");
+  thinking.className = "thinking";
+  addToChat(thinking);
+  const started = performance.now();
+  const timer = setInterval(() => {
+    thinking.textContent = `El agente está trabajando… ${Math.round((performance.now() - started) / 1000)} s`;
+  }, 250);
+  try {
+    const data = await api(path, body);
+    state.turn += 1;
+    state.paused = false;
+    if (data.reply.trim()) addMessage("agent", data.reply, { markdown: true });
+    addIdeas(data.ideas);
+    addTrace(state.turn, data, performance.now() - started);
+    for (const render of data.renders ?? []) addRenderCard(render);
+    if (data.pending_approval) addApprovalCard(data.pending_approval);
+    return true;
+  } catch (error) {
+    if (onError) await onError(error);
+    else addMessage("error", error.message);
+    return false;
+  } finally {
+    clearInterval(timer);
+    thinking.remove();
+    setBusy(false);
+    if (!state.paused) $("text").focus();
+  }
 }
 
 const formatSize = (bytes) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
@@ -464,7 +643,7 @@ async function send(event) {
   const videos = [...state.pendingVideos];
   // Con un video adjunto se puede enviar sin texto: el mensaje lo describe igual.
   const text = $("text").value.trim() || (videos.length ? "Te adjunto un video." : "");
-  if (!text || state.busy || state.uploading || !state.threadId) return;
+  if (!text || state.busy || state.paused || state.uploading || !state.threadId) return;
   $("text").value = "";
   addMessage("user", text);
   if (videos.length) {
@@ -474,42 +653,24 @@ async function send(event) {
   }
   state.pendingVideos = [];
   renderAttachments();
-  setBusy(true);
 
-  const thinking = document.createElement("div");
-  thinking.className = "thinking";
-  addToChat(thinking);
-  const started = performance.now();
-  const timer = setInterval(() => {
-    thinking.textContent = `El agente está trabajando… ${Math.round((performance.now() - started) / 1000)} s`;
-  }, 250);
-
-  try {
-    const data = await api(`/sessions/${state.threadId}/messages`, { text, video_ids: videos.map((v) => v.id) });
-    state.turn += 1;
-    addMessage("agent", data.reply, { markdown: true });
-    addIdeas(data.ideas);
-    addTrace(state.turn, data, performance.now() - started);
-  } catch (error) {
-    // El texto y los videos vuelven al cuadro para reenviarlos sin rehacerlos.
-    $("text").value = text;
-    state.pendingVideos = videos;
-    renderAttachments();
-    if (error.status === 404 && error.detail === "sesión desconocida") {
-      // Las sesiones viven en la memoria del servidor (hasta la iteración 3):
-      // si se reinició, esta conversación ya no existe allá.
-      addMessage("notice", "El servidor se reinició y esta conversación se perdió: las sesiones todavía " +
-        "viven en memoria. Se abrió una nueva; reenviá tu mensaje cuando quieras.");
-      await newSession({ keepChat: true }).catch((e) => addMessage("error", e.message));
-    } else {
-      addMessage("error", `No se pudo enviar el mensaje. ${error.message}`);
-    }
-  } finally {
-    clearInterval(timer);
-    thinking.remove();
-    setBusy(false);
-    $("text").focus();
-  }
+  await runTurn(`/sessions/${state.threadId}/messages`, { text, video_ids: videos.map((v) => v.id) }, {
+    onError: async (error) => {
+      // El texto y los videos vuelven al cuadro para reenviarlos sin rehacerlos.
+      $("text").value = text;
+      state.pendingVideos = videos;
+      renderAttachments();
+      if (error.status === 404 && error.detail === "sesión desconocida") {
+        // Las sesiones viven en la memoria del servidor (hasta la iteración 3):
+        // si se reinició, esta conversación ya no existe allá.
+        addMessage("notice", "El servidor se reinició y esta conversación se perdió: las sesiones todavía " +
+          "viven en memoria. Se abrió una nueva; reenviá tu mensaje cuando quieras.");
+        await newSession({ keepChat: true }).catch((e) => addMessage("error", e.message));
+      } else {
+        addMessage("error", `No se pudo enviar el mensaje. ${error.message}`);
+      }
+    },
+  });
 }
 
 $("composer").addEventListener("submit", send);

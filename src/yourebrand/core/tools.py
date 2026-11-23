@@ -47,6 +47,7 @@ class ExecutionContext:
     # Lo pone el grafo, nunca el modelo: True solo cuando una persona aprobó
     # este pedido en la pausa. Una tool con requires_approval no corre sin esto.
     approved: bool = False
+    session_ideas: tuple[Any, ...] = ()  # ideas generadas en esta sesión, para que las tools las vean
 
 
 class ToolCall(BaseModel):
@@ -87,6 +88,15 @@ class RetryableToolError(RuntimeError):
 # Forma que tiene que tener un handler: recibe (args, contexto) y devuelve un
 # ToolResult. Es solo un alias para que las firmas se lean mejor.
 ToolHandler = Callable[[dict[str, Any], ExecutionContext], ToolResult]
+# Para una tool con requires_approval: qué se le muestra a la persona antes de
+# decidir (por ejemplo, el plan que se va a renderizar). Recibe los argumentos
+# ya validados. Si no hay nada que aprobar (el plan no existe), lanza
+# ApprovalPreviewError y el pedido vuelve al modelo como error, sin pausar.
+ApprovalPreview = Callable[[dict[str, Any], ExecutionContext], dict[str, Any]]
+
+
+class ApprovalPreviewError(ValueError):
+    """El pedido no se puede mostrar para aprobar: no tiene sentido pausar por él."""
 
 
 def _validation_summary(details: list[dict[str, Any]]) -> list[str]:
@@ -112,6 +122,7 @@ class Tool:
         idempotent: bool = True,
         max_calls_per_run: int | None = None,
         requires_approval: bool = False,
+        approval_preview: ApprovalPreview | None = None,
     ) -> None:
         # Se valida al crear la tool, cuando arranca el programa, y no al
         # ejecutarla: una tool mal configurada falla enseguida y no en medio
@@ -145,6 +156,9 @@ class Tool:
         # Human-in-the-loop: el grafo pausa antes de ejecutarla y espera la
         # decisión de una persona. El runtime la bloquea si llega sin aprobación.
         self.requires_approval = requires_approval
+        if approval_preview is not None and not requires_approval:
+            raise ValueError(f"{name}: approval_preview solo tiene sentido con requires_approval")
+        self.approval_preview = approval_preview
 
     def function_declaration(self) -> dict[str, Any]:
         """Lo que ve el modelo: nombre, descripción y schema de argumentos.
@@ -201,6 +215,24 @@ class ToolRegistry:
         """Si el pedido a esta tool tiene que pausar para que una persona lo apruebe."""
         tool = self.tools.get(tool_name)
         return tool is not None and tool.requires_approval
+
+    def approval_request(self, call: ToolCall, context: ExecutionContext) -> dict[str, Any]:
+        """Lo que se le muestra a la persona para aprobar un pedido: tool, argumentos y vista previa.
+
+        Valida los argumentos igual que `run`: no se pausa por un pedido que
+        igual fallaría. Lanza ApprovalPreviewError si no hay nada que aprobar.
+        """
+        tool = self.tools.get(call.tool_name)
+        if tool is None or not tool.requires_approval:
+            raise ApprovalPreviewError(f"{call.tool_name} no requiere aprobación")
+        try:
+            args = tool.args_model.model_validate(call.arguments).model_dump() if tool.args_model else dict(call.arguments)
+        except ValidationError as exc:
+            raise ApprovalPreviewError(
+                "Argumentos inválidos: " + "; ".join(_validation_summary(exc.errors(include_url=False)))
+            ) from None
+        preview = tool.approval_preview(args, context) if tool.approval_preview else {}
+        return {"call_id": call.id, "tool": tool.name, "arguments": args, "preview": preview}
 
     def register(self, tool: Tool) -> None:
         # Dos tools con el mismo nombre: la segunda pisaría a la primera sin avisar.

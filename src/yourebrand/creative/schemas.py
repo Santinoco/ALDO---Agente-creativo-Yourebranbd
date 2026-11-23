@@ -54,6 +54,26 @@ class IdeaList(BaseModel):
 
     ideas: list[Idea] = Field(min_length=1, description="Ideas de contenido, cada una distinta de las demás.")
 
+class SimilarityVerdict(BaseModel):
+    """Juicio sobre una idea frente a lo ya publicado."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    idea_id: NonEmptyStr = Field(description="Id de la idea juzgada, tal como figura en el material.")
+    # El motivo va antes del veredicto: el modelo razona primero y concluye después.
+    reason: NonEmptyStr = Field(description="En una oración, qué coincide con lo publicado o qué cambia.")
+    verdict: Literal["repetida", "parecida", "distinta"] = Field(description="Conclusión de la comparación.")
+    reference_ids: list[str] = Field(description="Ids de las referencias parecidas. Vacío si es 'distinta'.")
+
+
+class SimilarityReport(BaseModel):
+    """Respuesta completa del modelo al comparar ideas."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdicts: list[SimilarityVerdict] = Field(description="Un veredicto por cada idea nueva.")
+
+
 
 # --- Plan de edición de video UGC --------------------------------------------
 #

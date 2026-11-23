@@ -18,17 +18,26 @@ from pydantic import BaseModel, Field, create_model, field_validator
 from yourebrand.core.config import get_settings
 from yourebrand.core.errors import BudgetExceededError, LLMError
 from yourebrand.core.reliability import validate_user_text
-from yourebrand.core.tools import ExecutionContext, Tool, ToolRegistry, ToolResult, model_usage_metadata
+from yourebrand.core.tools import (
+    ApprovalPreviewError,
+    ExecutionContext,
+    Tool,
+    ToolRegistry,
+    ToolResult,
+    model_usage_metadata,
+)
 from yourebrand.core.trace import emit
 from yourebrand.creative.context import MissingBrandError, load_brand, load_previous_posts
 from yourebrand.creative.ideas import MAX_IDEAS, NotEnoughIdeasError, generate_ideas_with_usage
 from yourebrand.creative.schemas import ContentType, GeneratedIdea
+from yourebrand.creative.similarity import check_idea_similarity
 from yourebrand.core.media import MediaError
-from yourebrand.core.storage import VIDEO_ID_PATTERN, UnknownVideoError
+from yourebrand.core.storage import PLAN_ID_PATTERN, VIDEO_ID_PATTERN, UnknownPlanError, UnknownVideoError
 from yourebrand.core.transcription import TranscriptionFailedError, TranscriptionUnavailableError
 from yourebrand.core.video_prep import prepare_video
 from yourebrand.creative.skills import Skill, available_skills, get_skill
 from yourebrand.creative.video_edit import InvalidPlanError, plan_video_edit
+from yourebrand.creative.video_render import PlanNotApprovedError, load_plan, start_render, store_plan
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +169,68 @@ def generate_ideas_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResu
         },
     )
 
+class CheckSimilarityArgs(BaseModel):
+    """Ids y no texto: así se verifica la idea real, no una versión reescrita por el modelo."""
+
+    idea_ids: list[str] = Field(
+        min_length=1, max_length=MAX_IDEAS, description="Ids de las ideas de esta conversación a verificar."
+    )
+
+
+def check_similarity_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResult:
+    """Compara ideas de la sesión contra lo que el cliente ya publicó."""
+    idea_ids = list(dict.fromkeys(args["idea_ids"]))  # sin repetidos, en el mismo orden
+    known = {idea.id: idea for idea in ctx.session_ideas}
+    missing = [idea_id for idea_id in idea_ids if idea_id not in known]
+    if missing:
+        return ToolResult(
+            ok=False,
+            content=f"No existen en esta conversación: {', '.join(missing)}. "
+            f"Ideas disponibles: {', '.join(known) or 'ninguna'}. Si recién las generaste, "
+            "llamá a esta tool en el paso siguiente.",
+            metadata={"error_type": "unknown_idea"},
+        )
+
+    try:
+        check = check_idea_similarity(ctx.tenant, [known[idea_id] for idea_id in idea_ids], run_id=ctx.run_id)
+    except LLMError as exc:
+        metadata: dict[str, Any] = {"error_type": type(exc).__name__}
+        usage = getattr(exc, "usage", None)
+        if usage is not None:
+            metadata |= model_usage_metadata(usage.input_tokens, usage.output_tokens)
+        return ToolResult(
+            ok=False,
+            content=f"No se pudo verificar la similitud ({type(exc).__name__}). No presentes las ideas "
+            "como verificadas: podés intentar una vez más o avisarle a la persona.",
+            metadata=metadata,
+        )
+
+    if check.usage is None:
+        # No es "distinta": no se comparó contra nada y el modelo tiene que saberlo.
+        return ToolResult(
+            ok=True,
+            content=json.dumps({"checked": False, "message": NO_POSTS_MESSAGE}, ensure_ascii=False),
+            metadata={"checked": False},
+        )
+
+    titles = {reference.id: reference.title for reference in check.references}
+    results = [
+        {
+            "idea_id": verdict.idea_id,
+            "verdict": verdict.verdict,
+            "reason": verdict.reason,
+            "similar_to": [{"id": ref_id, "title": titles[ref_id]} for ref_id in verdict.reference_ids],
+        }
+        for verdict in check.verdicts
+    ]
+    emit(logger, "similarity_checked", run_id=ctx.run_id, client_id=ctx.tenant.client_id, ideas=len(results),
+         flagged=sum(item["verdict"] != "distinta" for item in results))
+    return ToolResult(
+        ok=True,
+        content=json.dumps({"checked": True, "results": results}, ensure_ascii=False),
+        metadata={"checked": True, **model_usage_metadata(check.usage.input_tokens, check.usage.output_tokens)},
+    )
+
 
 # Clave de la metadata donde plan_video_edit deja el plan completo, para la
 # aprobación y el render. Al modelo le vuelve solo un resumen.
@@ -187,9 +258,10 @@ class PlanVideoEditArgs(BaseModel):
         return None if value is None else validate_user_text(value, max_len=MAX_VIDEO_NOTES_CHARS)
 
 
-def _plan_summary(video_id: str, plan: Any) -> dict[str, Any]:
+def _plan_summary(video_id: str, plan: Any, plan_id: str | None = None) -> dict[str, Any]:
     """Lo que vuelve al historial: lo necesario para presentar el plan, sin el detalle del render."""
     return {
+        **({"plan_id": plan_id} if plan_id else {}),
         "video_id": video_id,
         "tipo": plan.video_type,
         "gancho": plan.hook,
@@ -246,15 +318,67 @@ def plan_video_edit_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolRes
         )
 
     plan = generation.plan
+    # El plan queda en disco con un id: render_video recibe solo ese id, así el
+    # modelo no puede reescribir el plan entre la aprobación y el render.
+    stored = store_plan(ctx.tenant, video_id, plan, run_id=ctx.run_id)
+    emit(logger, "plan_stored", run_id=ctx.run_id, client_id=ctx.tenant.client_id, plan_id=stored.plan_id,
+         video_id=video_id, segments=len(plan.segments))
     return ToolResult(
         ok=True,
-        content=json.dumps(_plan_summary(video_id, plan), ensure_ascii=False),
+        content=json.dumps(_plan_summary(video_id, plan, stored.plan_id), ensure_ascii=False),
         metadata={
+            "plan_id": stored.plan_id,
             VIDEO_PLAN_METADATA_KEY: {"video_id": video_id, **plan.model_dump()},
             "frames": len(prep.frames),
             "words": len(prep.transcript.words),
             **model_usage_metadata(generation.usage.input_tokens, generation.usage.output_tokens),
         },
+    )
+
+
+# Clave de la metadata donde render_video deja el estado inicial del render,
+# para que la pantalla lo siga. El modelo ve solo el id y las advertencias.
+RENDER_METADATA_KEY = "render"
+
+
+class RenderVideoArgs(BaseModel):
+    plan_id: str = Field(
+        pattern=PLAN_ID_PATTERN.pattern,
+        description="Id del plan de edición que devolvió plan_video_edit (plan-...).",
+    )
+
+
+def render_video_preview(args: dict[str, Any], ctx: ExecutionContext) -> dict[str, Any]:
+    """Lo que ve la persona antes de aprobar: el plan guardado, no lo que diga el modelo de él."""
+    try:
+        stored = load_plan(ctx.tenant, args["plan_id"])
+    except UnknownPlanError:
+        raise ApprovalPreviewError(f"no hay un plan {args['plan_id']} en esta sesión") from None
+    return _plan_summary(stored.video_id, stored.plan, stored.plan_id)
+
+
+def render_video_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResult:
+    """Arranca el render de un plan aprobado. No espera: el render sigue en segundo plano."""
+    try:
+        # ctx.approved lo pone el grafo después de la pausa; start_render lo vuelve a controlar.
+        status = start_render(ctx.tenant, args["plan_id"], run_id=ctx.run_id, approved=ctx.approved)
+    except UnknownPlanError:
+        return ToolResult(ok=False, content=f"No hay un plan {args['plan_id']} en esta sesión. Revisá el id.",
+                          metadata={"error_type": "unknown_plan"})
+    except PlanNotApprovedError:
+        return ToolResult(ok=False, content="El plan no está aprobado: no se renderizó.",
+                          metadata={"error_type": "approval_required"})
+    return ToolResult(
+        ok=True,
+        content=json.dumps(
+            {
+                "render_id": status.render_id,
+                "estado": "en curso",
+                "advertencias": status.warnings,
+            },
+            ensure_ascii=False,
+        ),
+        metadata={"render_id": status.render_id, RENDER_METADATA_KEY: status.model_dump(mode="json")},
     )
 
 
@@ -367,6 +491,25 @@ def build_creative_registry(
             retries=0,
         )
     )
+    registry.register(
+        Tool(
+            name="check_similarity",
+            description=(
+                "Compara ideas ya generadas en esta conversación contra lo que la marca publicó y dice, "
+                "por idea, si es 'repetida', 'parecida' o 'distinta', a qué post se parece y por qué. "
+                "Usala cuando una idea toque un tema, producto o formato que la marca ya publicó, o "
+                "cuando la persona pida evitar repetir. No hace falta para una idea claramente nueva. "
+                "Si es repetida, no la presentes así: cambiala o generá otra, una sola vez. Si es "
+                "parecida, mostrala y avisá a qué post se parece: decide la persona."
+            ),
+            kind="compute",
+            fn=check_similarity_tool,
+            args_model=CheckSimilarityArgs,
+            timeout_s=generation_timeout_s,
+            retries=0,
+            max_calls_per_run=3,  # verificar, corregir y volver a verificar, sin bucles
+        )
+    )
     if video_edit:
         registry.register(
             Tool(
@@ -374,9 +517,11 @@ def build_creative_registry(
                 description=(
                     "Arma el plan de edición de un video UGC adjunto: tipo de video, gancho, tramos con sus "
                     "tiempos, b-roll, subtítulos, textos, música, cierre y advertencias. No edita el video: "
-                    "devuelve un plan para que la persona lo apruebe. Usala cuando la persona adjuntó un "
-                    "video y pide editarlo. Si no hay video adjunto, pedile que lo suba. Puede tardar unos "
-                    "minutos: avisale. Presentale el plan resumido y las advertencias."
+                    "devuelve un plan con su plan_id. Usala cuando la persona adjuntó un video y pide "
+                    "editarlo. Si no hay video adjunto, pedile que lo suba. Puede tardar unos minutos. "
+                    "Con el plan listo, presentaselo resumido con las advertencias y llamá enseguida a "
+                    "render_video con ese plan_id: la persona lo aprueba o lo rechaza ahí. Si lo rechaza "
+                    "con un comentario, volvé a llamar a esta tool con ese comentario en `notes`."
                 ),
                 kind="compute",
                 fn=plan_video_edit_tool,
@@ -387,7 +532,28 @@ def build_creative_registry(
                 max_calls_per_run=video_edit_max_calls,
             )
         )
-    skills = list(available_skills().values())
+        registry.register(
+            Tool(
+                name="render_video",
+                description=(
+                    "Arma el video editado a partir de un plan de plan_video_edit. Antes de ejecutarse, la "
+                    "app pausa y le muestra el plan a la persona para que lo apruebe o lo rechace: no le "
+                    "preguntes vos si lo aprueba, llamala directamente con el plan_id. Si se aprueba, "
+                    "devuelve el id del render: el video tarda unos minutos y aparece en la pantalla "
+                    "cuando termina, avisale. Si se rechaza, no se renderiza y recibís su comentario."
+                ),
+                # local_write: deja un archivo en la máquina, no toca sistemas externos.
+                kind="local_write",
+                fn=render_video_tool,
+                args_model=RenderVideoArgs,
+                timeout_s=10,  # solo encola: el render corre en segundo plano
+                retries=0,
+                idempotent=False,  # repetirlo haría dos renders
+                requires_approval=True,
+                approval_preview=render_video_preview,
+            )
+        )
+    skills =list(available_skills().values())
     if skills:
         registry.register(
             Tool(

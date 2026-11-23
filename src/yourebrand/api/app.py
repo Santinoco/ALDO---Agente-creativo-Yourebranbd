@@ -11,6 +11,7 @@ Para levantarla:
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 from yourebrand.core.reliability import InvalidUserInputError
 from yourebrand.core.storage import (
     InvalidVideoError,
+    UnknownRenderError,
     UnknownVideoError,
     VideoRef,
     VideoTooLargeError,
@@ -29,14 +31,19 @@ from yourebrand.core.tenancy import InvalidClientIdError, UnknownClientError, li
 from yourebrand.core.trace import TraceEvent
 from yourebrand.creative.graph import (
     AgentSession,
+    NoPendingApprovalError,
+    PendingApprovalError,
     SessionClientMismatchError,
     StepTrace,
+    TurnOutcome,
     build_graph,
     open_session,
+    resume_turn,
     run_turn,
 )
 from yourebrand.creative.schemas import GeneratedIdea
 from yourebrand.creative.tools import build_creative_registry
+from yourebrand.creative.video_render import RenderNotReadyError, RenderStatus, get_render, render_output
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -65,6 +72,31 @@ class TurnResponse(BaseModel):
     trace: list[StepTrace]
     events: list[TraceEvent]  # el detalle de todo lo que pasó en el turno, en orden
     ideas: list[GeneratedIdea]
+    # Si el turno quedó en pausa: lo que hay que aprobar o rechazar con POST .../approval.
+    pending_approval: list[dict[str, Any]] | None = None
+    # Renders que arrancaron en el turno: se siguen con GET .../renders/{render_id}.
+    renders: list[RenderStatus] = Field(default_factory=list)
+
+    @classmethod
+    def from_outcome(cls, outcome: TurnOutcome) -> "TurnResponse":
+        return cls(
+            reply=outcome.reply,
+            run_id=outcome.run_id,
+            tools_called=outcome.tools_called,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            trace=outcome.trace,
+            events=outcome.events,
+            ideas=outcome.ideas,
+            pending_approval=outcome.pending_approval,
+            renders=[RenderStatus.model_validate(render) for render in outcome.renders],
+        )
+
+
+class ApprovalRequest(BaseModel):
+    approved: bool
+    # Al rechazar, qué cambiar: el agente vuelve a planear con esto.
+    comment: str | None = None
 
 
 class SessionStore:
@@ -157,16 +189,52 @@ def create_app(graph=None) -> FastAPI:
             raise HTTPException(status_code=404, detail="video desconocido") from None
         except SessionClientMismatchError:
             raise HTTPException(status_code=409, detail="la sesión pertenece a otro cliente") from None
-        return TurnResponse(
-            reply=outcome.reply,
-            run_id=outcome.run_id,
-            tools_called=outcome.tools_called,
-            input_tokens=outcome.input_tokens,
-            output_tokens=outcome.output_tokens,
-            trace=outcome.trace,
-            events=outcome.events,
-            ideas=outcome.ideas,
-        )
+        except PendingApprovalError:
+            raise HTTPException(status_code=409, detail="primero aprobá o rechazá lo pendiente") from None
+        return TurnResponse.from_outcome(outcome)
+
+    # Resuelve la pausa del turno: aprobar o rechazar (con un comentario). El
+    # turno sigue donde se cortó y la respuesta es la misma que la de un mensaje.
+    @app.post("/sessions/{thread_id}/approval")
+    def resolve_approval(thread_id: str, request: ApprovalRequest) -> TurnResponse:
+        session = _session(thread_id)
+        try:
+            outcome = resume_turn(app.state.graph, session, request.approved, request.comment)
+        except InvalidUserInputError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except NoPendingApprovalError:
+            raise HTTPException(status_code=409, detail="no hay nada pendiente de aprobación") from None
+        except SessionClientMismatchError:
+            raise HTTPException(status_code=409, detail="la sesión pertenece a otro cliente") from None
+        return TurnResponse.from_outcome(outcome)
+
+    # Los renders cuelgan de la sesión: el cliente sale de ella, así un
+    # render_id de otro cliente no existe acá.
+    @app.get("/sessions/{thread_id}/renders/{render_id}")
+    def render_status(thread_id: str, render_id: str) -> RenderStatus:
+        session = _session(thread_id)
+        try:
+            return get_render(TenantContext(session.client_id), render_id)
+        except UnknownRenderError:
+            raise HTTPException(status_code=404, detail="render desconocido") from None
+
+    @app.get("/sessions/{thread_id}/renders/{render_id}/video")
+    def render_video_file(thread_id: str, render_id: str) -> FileResponse:
+        session = _session(thread_id)
+        try:
+            path = render_output(TenantContext(session.client_id), render_id)
+        except UnknownRenderError:
+            raise HTTPException(status_code=404, detail="render desconocido") from None
+        except RenderNotReadyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return FileResponse(path, media_type="video/mp4", filename=f"{render_id}.mp4",
+                            content_disposition_type="inline")
+
+    def _session(thread_id: str) -> AgentSession:
+        session = app.state.sessions.get(thread_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="sesión desconocida")
+        return session
 
     return app
 

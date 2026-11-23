@@ -261,7 +261,7 @@ def video(tmp_path, monkeypatch):
 def test_prepare_extracts_frames_silences_and_transcript_and_caches_them(video):
     prep = video_prep.prepare_video(ACME, video.ref.id)
 
-    assert [f.at_s for f in prep.frames] == [0.0, 2.5, 5.0, 7.5]
+    assert [f.at_s for f in prep.frames] == [0.0, 2.5, 4.5, 5.0, 7.5]  # 4.5: adentro del silencio largo
     assert prep.silences[0].start_s == 4.0
     assert prep.transcript.text == "Probé el café"
 
@@ -373,16 +373,21 @@ def test_plan_tool_returns_a_summary_and_keeps_the_full_plan_in_metadata(video, 
 
     assert result.ok, result.content
     summary = json.loads(result.content)
-    assert summary["tipo"] == "recomendacion" and summary["duracion_estimada_s"] == 8.0
+    assert summary["tipo"] == "recomendacion" and summary["duracion_estimada_s"] == 9.3
     assert summary["tramos"][0]["b_roll"] == 1
     assert result.metadata[VIDEO_PLAN_METADATA_KEY]["segments"][0]["b_roll"][0]["description"] == "la taza"
     assert result.metadata[MODEL_INPUT_TOKENS_KEY] == 5000
+    # El plan queda guardado: render_video lo lee por su id, no por lo que diga el modelo.
+    from yourebrand.creative.video_render import load_plan
+    assert summary["plan_id"] == result.metadata["plan_id"]
+    stored = load_plan(ACME, summary["plan_id"])
+    assert stored.video_id == video.ref.id and stored.plan.duration_s == 9.3
 
     # A Claude le llegan la tarea video_edit, los fotogramas, la skill, la marca y la transcripción.
     assert claude["tier"] == "video_edit"
-    assert len(claude["images"]) == 4
+    assert len(claude["images"]) == 5
     assert "Edición de videos UGC" in claude["system"] and "Tono cercano" in claude["system"]
-    assert "[0.50]Probé" in claude["prompt"] and "es para TikTok" in claude["prompt"]
+    assert "[0.50-0.90]Probé" in claude["prompt"] and "es para TikTok" in claude["prompt"]
     assert "4.00 a 5.00 s" in claude["prompt"]
 
 
@@ -434,3 +439,78 @@ def test_registry_only_offers_the_tool_when_video_edit_is_enabled():
     names = lambda reg: [d["name"] for d in reg.function_declarations()]  # noqa: E731
     assert "plan_video_edit" in names(build_creative_registry(generation_timeout_s=5, video_edit=True))
     assert "plan_video_edit" not in names(build_creative_registry(generation_timeout_s=5, video_edit=False))
+
+
+# --- Protección del habla: solo se corta en silencios largos ---------------------
+
+
+def speech_prep(silences, words=(), duration=17.0):
+    return video_prep.VideoPreparation(
+        video_id="vid-000000000001", duration_s=duration, frames=[],
+        silences=[video_prep.SilenceSpan(start_s=a, end_s=b) for a, b in silences],
+        transcript=Transcript(language="es", words=[Word(start_s=a, end_s=b, text=t) for a, b, t in words]),
+    )
+
+
+def plan_with(*spans, **overrides):
+    segments = [{"start_s": a, "end_s": b, "purpose": "x", "zoom": bool(i % 2), "b_roll": []}
+                for i, (a, b) in enumerate(spans)]
+    return VideoEditPlan.model_validate(plan_dict(segments=segments, on_screen_texts=[], warnings=[]) | overrides)
+
+
+def spans(plan):
+    return [(s.start_s, s.end_s) for s in plan.segments]
+
+
+def test_a_cut_between_words_is_undone_and_the_end_is_kept():
+    # El caso real: el modelo sacó "hola", una palabra del medio y todo el final.
+    prep = speech_prep([(0.0, 0.8), (4.0, 4.5), (7.0, 9.0)])
+    result = video_edit.protect_speech(plan_with((1.0, 2.0), (2.3, 5.6), (9.3, 11.0)), prep)
+
+    assert spans(result) == [(0.65, 2.3), (2.3, 7.15), (8.85, 17.0)]
+
+
+def test_a_short_pause_is_never_a_cut():
+    prep = speech_prep([(4.0, 4.9)], duration=10.0)
+    assert spans(video_edit.protect_speech(plan_with((0.0, 4.0), (4.9, 10.0)), prep)) == [(0.0, 4.9), (4.9, 10.0)]
+
+
+def test_a_segment_across_a_long_silence_keeps_it():
+    # Si en el silencio se muestra algo, el modelo lo conserva con un solo tramo.
+    prep = speech_prep([(4.0, 7.0)], duration=10.0)
+    assert spans(video_edit.protect_speech(plan_with((1.0, 9.0)), prep)) == [(0.0, 10.0)]
+
+
+def test_contiguous_segments_only_change_the_zoom():
+    prep = speech_prep([], duration=10.0)
+    result = video_edit.protect_speech(plan_with((0.0, 3.0), (3.0, 6.0), (6.0, 10.0)), prep)
+    assert spans(result) == [(0.0, 3.0), (3.0, 6.0), (6.0, 10.0)]
+    assert [s.zoom for s in result.segments] == [False, True, False]
+
+
+def test_a_whole_block_left_out_is_reported():
+    prep = speech_prep([(4.0, 6.0)], words=[(1.0, 2.0, "primera"), (7.0, 8.0, "repetida")], duration=10.0)
+    result = video_edit.protect_speech(plan_with((1.0, 3.0)), prep)
+
+    assert spans(result) == [(0.0, 4.15)]
+    assert "repetida" in result.warnings[0]
+
+
+def test_a_block_can_move_to_the_front_whole():
+    prep = speech_prep([(4.0, 6.0)], duration=10.0)
+    result = video_edit.protect_speech(plan_with((7.0, 8.0), (1.0, 2.0)), prep)
+    assert spans(result) == [(5.85, 10.0), (0.0, 4.15)]
+
+
+def test_on_screen_text_follows_its_moment():
+    prep = speech_prep([(0.0, 2.0)], duration=10.0)
+    text = {"text": "dato", "at_s": 1.0}
+    result = video_edit.protect_speech(plan_with((3.0, 6.0), on_screen_texts=[text]), prep)
+    # Era el segundo 4.0 del original: el video ahora arranca en 1.85.
+    assert result.on_screen_texts[0].at_s == pytest.approx(2.15)
+
+
+def test_a_long_result_warns_instead_of_cutting():
+    prep = speech_prep([], duration=100.0)
+    result = video_edit.protect_speech(plan_with((0.0, 50.0)), prep)
+    assert spans(result) == [(0.0, 100.0)] and "100 s" in result.warnings[0]

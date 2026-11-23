@@ -1,6 +1,6 @@
 # Plan de desarrollo por iteraciones
 
-Plan hasta la entrega del Trabajo Final Integrador (TFI): **domingo 8 de noviembre de 2026, 23:59 h**. El alcance y las decisiones de arquitectura están en `CLAUDE.md`; este archivo detalla qué se construye en cada iteración.
+Plan hasta la entrega del Trabajo Final Integrador (TFI): **miércoles 9 de diciembre de 2026** (la fecha original era el 8 de noviembre; se corrió porque se atrasó el curso). El alcance y las decisiones de arquitectura están en `CLAUDE.md`; este archivo detalla qué se construye en cada iteración.
 
 Cada iteración termina con algo que funciona y se puede mostrar. No se empieza una iteración hasta cumplir el "Listo cuando" de la anterior.
 
@@ -12,10 +12,13 @@ El set de evaluación (`evals/`) se crea en la iteración 2 y crece en cada iter
 |---|---|---|---|---|
 | 0 | Base común (`core/`) | | | Hecha |
 | 1 | Creativo mínimo: ideas desde archivos | | | Hecha |
-| 2 | Agente con tools | 18/10 | Capacidad agéntica, skill, evaluación inicial | **Siguiente** |
-| 3 | Estado, HITL y Notion | 25/10 | Estado y memoria, human-in-the-loop, integración externa | Pendiente |
-| 4 | Interfaz y reproducibilidad | 1/11 | Interfaz accesible, ejecución reproducible | Pendiente |
-| 5 | Evaluación y entrega | 8/11 | Evidencia de calidad, README, demo | Pendiente |
+| 2 | Agente con tools | 2/12 | Capacidad agéntica, skill, evaluación inicial | Casi cerrada: faltan `refine_idea`, `check_similarity` y `evals/` |
+| 2b | Edición de video de punta a punta | 25/11 | Human-in-the-loop (la pausa genérica), funcionamiento end-to-end | **Siguiente** |
+| 3 | Estado, HITL y Notion | 2/12 | Estado y memoria, human-in-the-loop, integración externa | Pendiente |
+| 4 | Interfaz y reproducibilidad | 5/12 | Interfaz accesible, ejecución reproducible | Pendiente |
+| 5 | Evaluación y entrega | 9/12 | Evidencia de calidad, README, demo | Pendiente |
+
+La 2b se hace antes de cerrar la 2 y de empezar la 3, como excepción a la regla de arriba: es el avance que se muestra al profesor y al cliente. Lo que falta de la 2 se cierra junto con la 3.
 
 ---
 
@@ -90,6 +93,29 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 - Qdrant, Supabase, un segundo agente.
 
 **Listo cuando:** desde la pantalla, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y la traza muestra que el modelo eligió tools distintas en cada turno. Además, un pedido ambiguo hace que el agente pregunte sin generar, una idea parecida a un post de `tambor` queda marcada, y el set de evaluación corre y deja sus resultados en `artifacts/`.
+
+---
+
+## Iteración 2b: Edición de video de punta a punta
+
+**Objetivo:** que la persona suba un video crudo, apruebe el plan de edición y reciba el video editado desde la pantalla.
+
+**Ya hecho (iteración 2):** subida de videos, preparación con ffmpeg y faster-whisper, `plan_video_edit` con Opus 5.5 y la skill `ugc-video-editing`, y la base del render en `creative/video_render.py` (subtítulos ASS, argumentos de ffmpeg, render en segundo plano con estado en disco).
+
+**Implementar:**
+- Pausa genérica en el grafo: si el modelo pide una tool con `requires_approval`, el nodo que ejecuta tools se detiene con `interrupt` antes de correrla. La persona aprueba o rechaza con un comentario. Al rechazar, la tool no corre y al modelo le vuelve el rechazo como resultado de la tool, así el historial queda válido.
+- Tool `render_video(plan_id)` con `requires_approval`: con la aprobación arranca el render en segundo plano y vuelve enseguida con el id del render.
+- Endpoints, todos colgados de la sesión: resolver la pausa, consultar el estado de un render y descargar el video terminado.
+- Pantalla: tarjeta de aprobación con el resumen del plan, estado del render mientras corre y reproductor del video final.
+- Tests: la pausa (aprobar y rechazar) con el proveedor simulado, la tool, los endpoints, y un render real de pocos segundos que se saltea si no hay ffmpeg.
+
+**No implementar todavía:**
+- Música y efectos: falta la librería propia de temas de libre uso.
+- Editar el plan a mano en la pantalla: se modifica rechazando con un comentario.
+- Cancelar un turno o un render en curso.
+- Persistencia SQLite: la pausa vive en el checkpointer en memoria hasta la iteración 3.
+
+**Listo cuando:** desde la pantalla se sube un video de `tambor`, el agente arma el plan, se pausa, se rechaza una vez con un comentario y el agente vuelve a planear, se aprueba, y el video editado se reproduce en la pantalla. La traza muestra la pausa y la decisión.
 
 ---
 
@@ -176,7 +202,7 @@ A partir de acá no se agregan funciones: solo se corrige lo que la evaluación 
 
 ## Después del TFI
 
-Nada de esto se construye antes del 8 de noviembre. El detalle de cada punto está en `CLAUDE.md`, secciones "Fuera del TFI" y "Postergado: generación de imágenes".
+Nada de esto se construye antes del 9 de diciembre. El detalle de cada punto está en `CLAUDE.md`, secciones "Fuera del TFI" y "Postergado: generación de imágenes".
 
 - Datos reales de clientes en Supabase, con permisos por empleado.
 - Retrieval con Qdrant, solo si el material de un cliente deja de entrar en el contexto.

@@ -4,7 +4,7 @@ Sistema de agentes de IA para Yourebrand, agencia de marketing digital que gesti
 
 El proyecto es a la vez una herramienta real para Yourebrand y el Trabajo Final Integrador (TFI) de la certificación AI Agent Developer del ITBA. El autor quiere aprender a diseñar sistemas de IA de punta a punta.
 
-**Prioridad actual: entregar el TFI el domingo 8 de noviembre de 2026, 23:59 h.** Hasta esa fecha, todo lo que no sume a la entrega queda fuera de alcance (ver "Fuera del TFI").
+**Prioridad actual: entregar el TFI el miércoles 9 de diciembre de 2026.** La fecha original era el 8 de noviembre; se corrió porque se atrasó el curso. Hasta la entrega, todo lo que no sume a ella queda fuera de alcance (ver "Fuera del TFI").
 
 ## Cómo trabajar conmigo
 
@@ -59,7 +59,7 @@ Aprobó el alcance: un único agente (el Creativo), el Supervisor para después 
    - Decisiones agénticas concretas, además de elegir tool:
      - **Pedir aclaraciones**: si al pedido le falta algo que hace falta para generar (por ejemplo, el tipo de contenido), el agente pregunta en vez de suponer. No es una tool: es el camino del grafo en el que el modelo termina el turno sin llamar a ninguna.
      - **Evitar repetir**: `check_similarity` compara ideas contra los posts anteriores (y, desde la iteración 3, contra las ideas ya guardadas en Notion) y dice cuáles se parecen demasiado, a qué y por qué. Es una tool aparte y no un paso dentro de `generate_ideas` para que el modelo decida cuándo usarla; si fuera fija, sería un pipeline. Compara con el modelo rápido (`MODEL_FAST`) y el material entero en el contexto, sin embeddings.
-   - Skills: archivos `creative/skills/<nombre>/SKILL.md` (encabezado y criterio en Markdown), editables sin tocar código. `ugc-ideation` y `design-ideation` tienen el criterio de cada tipo de contenido y cuándo pedir aclaraciones y verificar similitud; `generate_ideas` aplica la del tipo pedido. `ugc-video-editing` tiene el criterio de edición de UGC, tomado de la guía del equipo de edición de Yourebrand (noviembre 2026); quedan puntos por definir con el equipo, listados al final de la skill. El prompt del agente lista las skills y la tool `load_skill` trae el criterio completo cuando el modelo decide que lo necesita.
+   - Skills: archivos `creative/skills/<nombre>/SKILL.md` (encabezado y criterio en Markdown), editables sin tocar código. `ugc-ideation` y `design-ideation` tienen el criterio de cada tipo de contenido y cuándo pedir aclaraciones y verificar similitud; `generate_ideas` aplica la del tipo pedido. `ugc-video-editing` (versión 2.1, noviembre 2026) tiene el criterio de edición de UGC: parte de la guía del equipo de edición de Yourebrand y la reescribe como un proceso concreto de orden, ritmo y zooms que no saca contenido, limitado a lo que el render puede ejecutar. El prompt del agente lista las skills y la tool `load_skill` trae el criterio completo cuando el modelo decide que lo necesita.
    - Human-in-the-loop: `save_ideas_to_notion` nunca escribe sin aprobación. El agente propone qué guardar, se pausa, y la persona aprueba, modifica o rechaza. Lo mismo con un video: `render_video` solo corre con un plan de edición que la persona aprobó.
    - Memoria por marca (propuesta; se decide si entra al TFI al cerrar la iteración 3): además del estado de cada sesión, el agente guarda entre conversaciones las preferencias del cliente que surgen al hablar con el empleado (por ejemplo, una corrección) y las tiene en cuenta en pedidos futuros. Reglas:
      - Cada memoria pertenece a un solo `client_id`; el filtro vive en `core/`, como el resto.
@@ -119,19 +119,20 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 
 Hecho:
 
-- `core/`: `config.py`, `tenancy.py`, `providers/` (contrato en `base.py`, un módulo por proveedor: Gemini y Anthropic), `llm.py` (`complete` y `complete_structured`), `errors.py` y `reliability.py` (validación de texto, reintentos, plazo por reloj), con tests.
-- `creative/cli.py`: pedido de ideas desde la terminal con una llamada real al modelo.
-- `creative/`: `context.py`, `prompts.py`, `schemas.py` e `ideas.py` (`generate_ideas` como pipeline fijo), con tests.
+- `core/`: `config.py`, `tenancy.py`, `providers/` (contrato en `base.py`, un módulo por proveedor: Gemini y Anthropic), `llm.py` (`complete`, `complete_structured` y turnos con tools), `tools.py` (runtime de tools, con `requires_approval`), `trace.py`, `errors.py`, `reliability.py`, `storage.py`, `media.py`, `video_prep.py` y `transcription.py`, con tests.
+- `creative/`: grafo de LangGraph (`graph.py`), tools `get_brand_info`, `get_previous_posts`, `generate_ideas`, `load_skill` y `plan_video_edit`, las skills `ugc-ideation`, `design-ideation` y `ugc-video-editing`, y la base del render en `video_render.py` (todavía sin conectar al agente).
+- `api/`: FastAPI con clientes, sesiones, mensajes y subida de videos, y la pantalla de demo con la traza de cada turno.
 - Cliente ficticio `data/tambor/` con `brand.md` y `posts.md`.
 
 Lo ya escrito no se tira: `generate_ideas` pasa a ser el interior de una tool, `context.py` el de las tools de lectura, y las guías de `prompts.py` se convierten en skills.
 
 Plan hasta la entrega, en orden. El detalle de cada iteración (qué implementar, qué no y cuándo está lista) está en `docs/iteraciones.md`. Antes de implementar algo, verificar a qué iteración pertenece; no se empieza una sin cerrar la anterior.
 
-- **Iteración 2, SIGUIENTE: agente con tools (hasta el 18/10).** Soporte de tools en `core/`, grafo de LangGraph, tools de lectura, `generate_ideas`, `refine_idea` y `check_similarity`, pedido de aclaraciones, las dos skills, set de evaluación inicial en `evals/` con su script, pantalla de demo con traza (FastAPI, adelantada de la iteración 4 en lugar del chat de terminal).
-- **Iteración 3: estado, HITL y Notion (hasta el 25/10).** Checkpointer SQLite, `save_ideas_to_notion` con pausa y aprobación, `check_similarity` también contra las ideas guardadas en Notion, segundo cliente ficticio, test de aislamiento, casos nuevos en el set de evaluación.
-- **Iteración 4: interfaz y reproducibilidad (hasta el 1/11).** Endpoints de FastAPI, pantalla mínima, Docker Compose, casos del recorrido de la demo en el set de evaluación.
-- **Iteración 5: evaluación y entrega (hasta el 8/11).** Correr el set completo, resultados y métricas en `artifacts/`, `README.md` con las 13 secciones y el diagrama, video de respaldo, tag `v1.0-tfi`.
+- **Iteración 2: agente con tools (casi cerrada).** Hecho: soporte de tools en `core/`, grafo de LangGraph, tools de lectura, `generate_ideas`, `load_skill`, las skills y la pantalla de demo con traza. Falta: `refine_idea`, `check_similarity` y el set de evaluación inicial en `evals/` con su script.
+- **Iteración 2b, SIGUIENTE: edición de video de punta a punta (hasta el 25/11).** Se hace antes que el resto porque es el avance que se muestra al profesor y al cliente. Pausa de aprobación genérica en el grafo (cualquier tool con `requires_approval`), tool `render_video`, endpoints para resolver la pausa y seguir el render, y la pantalla con la aprobación y el video final. La misma pausa la usa después `save_ideas_to_notion`.
+- **Cierre de la iteración 2 e iteración 3: estado, HITL y Notion (hasta el 2/12).** Lo que falta de la 2, checkpointer SQLite, `save_ideas_to_notion` sobre la pausa ya hecha, `check_similarity` también contra las ideas guardadas en Notion, segundo cliente ficticio, test de aislamiento, casos nuevos en el set de evaluación.
+- **Iteración 4: interfaz y reproducibilidad (hasta el 5/12).** Lo que falte de la pantalla, Docker Compose, casos del recorrido de la demo en el set de evaluación.
+- **Iteración 5: evaluación y entrega (hasta el 9/12).** Correr el set completo, resultados y métricas en `artifacts/`, `README.md` con las 13 secciones y el diagrama, video de respaldo, tag `v1.0-tfi`.
 
 El set de evaluación crece en cada iteración, no se arma al final. Mide los cuatro criterios que pidió el profesor: respeta el estilo de cada marca, evita repetir ideas, usa bien las tools (incluido preguntar cuando el pedido no está claro) y pide aprobación antes de guardar.
 
@@ -139,7 +140,7 @@ Los posts anteriores entran como texto (copy y descripción breve de la pieza), 
 
 ## Fuera del TFI
 
-No construir nada de esto antes del 8 de noviembre. Se retoma después de la entrega.
+No construir nada de esto antes del 9 de diciembre. Se retoma después de la entrega.
 
 - **Agente Supervisor**: revisión automática una vez por semana, por cliente, para el área de supervisión. Verifica que lo publicado en las redes del cliente use el material disponible en Google Drive (las grabaciones, si las hay), que se suba en tiempo y forma, y que cumpla lo pactado, que está en Notion junto con la información de la marca. Entrega un informe semanal con alertas; la persona decide qué hacer con cada una. Se conecta a Google Drive, a las redes del cliente y a Notion.
 - **Extractor de tareas**: detecta el cliente de una reunión de Fathom, la destila con un modelo, extrae tareas y las crea como borrador en Notion. Las reuniones no se indexan crudas y las tareas quedan como "sugeridas" hasta aprobación humana.
@@ -163,6 +164,7 @@ Flujo previsto:
 
 Reglas:
 
+- **Solo se corta en silencios largos (1 s o más), nunca entre palabras.** Lo garantiza el código (`protect_speech` en `creative/video_edit.py`), no la skill: el modelo elige qué bloques entran y en qué orden, y puede conservar un silencio si ahí se muestra algo. Un bloque con voz que queda afuera se avisa en el plan antes de aprobar.
 - El estado del grafo guarda referencias al video (id, duración, tamaño), nunca el archivo.
 - La edición es un trabajo largo: no se hace dentro de una petición HTTP que espera.
 - La música sale de una librería propia de temas de libre uso: la de CapCut, que usa el equipo, no tiene acceso programático.
@@ -179,7 +181,9 @@ Arquitectura (noviembre 2026):
 
 Almacenamiento (noviembre 2026): **local, en la máquina donde corre la app**, que es la de la persona que pide la edición. Los videos y todo lo que se deriva de ellos (fotogramas, transcripción, renders) van en una carpeta por `client_id`, fuera de git, y se acceden solo desde un módulo de `core/` (`core/storage.py`) que arma las rutas con el prefijo del cliente. Consecuencia: las sesiones y los videos no se comparten entre personas. Si más adelante la app corre en un servidor para el equipo, se cambia ese módulo por almacenamiento en la nube (candidato: Supabase Storage, ya previsto en el plan) sin tocar el resto.
 
-Por decidir: con qué se transcribe el audio (recomendado: Whisper en la misma máquina, con tiempos por palabra) y cómo se ejecuta el trabajo largo.
+Decidido al implementar (noviembre 2026): el audio se transcribe con faster-whisper en la misma máquina, con tiempos por palabra (extra `video` del `pyproject.toml`, más ffmpeg instalado aparte). El render corre en un hilo de fondo y deja su estado en disco; la tool vuelve enseguida con el id del render y la pantalla consulta el estado.
+
+Aprobación del plan: la persona aprueba o rechaza con un comentario. Rechazar con comentario es la forma de modificar: el agente vuelve a planear con ese comentario. Editar el plan a mano en la pantalla queda para después.
 
 ## Postergado: generación de imágenes
 

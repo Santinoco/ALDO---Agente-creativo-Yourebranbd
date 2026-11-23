@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 
 PREP_FILENAME = "prep.json"
 # Sube cuando cambia cómo se prepara: invalida lo guardado con la versión anterior.
-PREP_VERSION = 2  # 2: transcripción con filtro de voz (VAD)
+PREP_VERSION = 3  # 2: transcripción con filtro de voz (VAD). 3: fotogramas dentro de los silencios largos
+# Con un fotograma en cada silencio largo, el modelo puede ver si ahí se muestra
+# algo antes de decidir cortarlo. Con tope, porque cada imagen suma costo.
+SILENCE_FRAME_MIN_S = 1.0
+MAX_SILENCE_FRAMES = 10
 
 
 class Frame(BaseModel):
@@ -69,13 +73,15 @@ def prepare_video(tenant: TenantContext, video_id: str, *, max_frames: int | Non
         raise media.MediaProcessingError("no se pudo leer la duración del video (¿falta ffprobe?)")
 
     limit = max_frames or get_settings().video_max_frames
+    silences = [SilenceSpan(start_s=s.start_s, end_s=s.end_s) for s in media.detect_silences(source)]
+    long_silences = [s for s in silences if s.end_s - s.start_s >= SILENCE_FRAME_MIN_S][:MAX_SILENCE_FRAMES]
+    moments = {*media.frame_timestamps(duration, limit), *(round((s.start_s + s.end_s) / 2, 2) for s in long_silences)}
     frames = []
-    for i, at in enumerate(media.frame_timestamps(duration, limit)):
+    for i, at in enumerate(sorted(moments)):
         name = f"frame_{i:03d}.jpg"
         media.extract_frame(source, at, folder / name)
         frames.append(Frame(at_s=at, filename=name))
 
-    silences = [SilenceSpan(start_s=s.start_s, end_s=s.end_s) for s in media.detect_silences(source)]
     audio = media.extract_audio(source, folder / "audio.wav")
     transcript = transcribe(audio)
 
