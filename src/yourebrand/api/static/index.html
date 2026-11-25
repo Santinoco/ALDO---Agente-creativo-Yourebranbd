@@ -152,7 +152,7 @@
 const $ = (id) => document.getElementById(id);
 // pendingVideos: videos ya subidos que viajan con el próximo mensaje.
 // paused: el agente espera una aprobación; hasta resolverla no se envían mensajes.
-const state = { threadId: null, turn: 0, busy: false, uploading: false, paused: false, pendingVideos: [] };
+const state = { threadId: null, turn: 0, busy: false, uploading: false, paused: false, opening: false, pendingVideos: [] };
 
 // Todo texto pasa por escape antes de entrar al HTML: las respuestas vienen del
 // modelo y no se confía en ellas.
@@ -403,8 +403,18 @@ async function api(path, body) {
 // y conviene que la persona siga viendo lo que había pedido).
 async function newSession({ keepChat = false } = {}) {
   const clientId = $("client").value;
-  if (!clientId) return;
-  const session = await api("/sessions", { client_id: clientId });
+  // Una sola apertura a la vez: varios clics seguidos abrían varias sesiones y
+  // la que respondía última pisaba a las demás.
+  if (!clientId || state.opening) return;
+  state.opening = true;
+  refreshControls();
+  let session;
+  try {
+    session = await api("/sessions", { client_id: clientId });
+  } finally {
+    state.opening = false;
+    refreshControls();
+  }
   state.threadId = session.thread_id;
   state.turn = 0;
   state.paused = false;
@@ -427,7 +437,12 @@ function setBusy(busy) {
 
 // Mientras sube un video no se puede enviar: el mensaje tiene que llevar su id.
 function refreshControls() {
-  const blocked = state.busy || state.paused;
+  const blocked = state.busy || state.paused || state.opening;
+  // Cambiar de conversación mientras el agente responde mezclaba las dos: la
+  // respuesta vieja aparecía en la nueva, sin el historial que le dio sentido.
+  const switching = state.busy || state.uploading || state.opening;
+  $("new-session").disabled = switching;
+  $("client").disabled = switching;
   $("send").disabled = blocked || state.uploading;
   $("text").disabled = blocked;
   $("text").placeholder = state.paused ? "Primero aprobá o rechazá el plan de arriba…" : "Escribí tu pedido…";
@@ -550,8 +565,12 @@ async function runTurn(path, body, { onError } = {}) {
   const timer = setInterval(() => {
     thinking.textContent = `El agente está trabajando… ${Math.round((performance.now() - started) / 1000)} s`;
   }, 250);
+  // Segunda barrera: si igual se cambió de conversación, la respuesta de la
+  // anterior no se muestra en la nueva.
+  const threadId = state.threadId;
   try {
     const data = await api(path, body);
+    if (threadId !== state.threadId) return false;
     state.turn += 1;
     state.paused = false;
     if (data.reply.trim()) addMessage("agent", data.reply, { markdown: true });

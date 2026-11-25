@@ -110,7 +110,7 @@ class AgentState(TypedDict):
     # Annotated con operator.add: cada nodo devuelve solo los mensajes nuevos y
     # LangGraph los suma al final. Ningún nodo puede pisar el historial.
     messages: Annotated[list[Message], operator.add]
-    steps: int  # llamadas al modelo en el turno actual; se reinicia en cada turno
+    steps: int  # llamadas al modelo desde el último mensaje o decisión de la persona
     trace: Annotated[list[StepTrace], operator.add]
     # Ideas generadas en la sesión, con su id. Las tools que vengan después
     # (refinar, guardar en Notion) las buscan acá por id, sin que el modelo las reescriba.
@@ -373,7 +373,13 @@ def build_graph(
         emit(logger, "approval_resolved", run_id=context.run_id, client_id=context.tenant.client_id,
              tools=[request["tool"] for request in requests], approved=decision.approved,
              has_comment=decision.comment is not None)
+        # La decisión de la persona cuenta como un mensaje nuevo: los pasos y los
+        # topes por tool vuelven a cero. Sin esto, un solo rechazo agotaba el
+        # turno y un segundo rechazo ya no podía volver a planear. Los límites
+        # siguen frenando un bucle del modelo, porque cada vuelta necesita a una persona.
+        registry.reset_calls(context.run_id)
         return {
+            "steps": 0,
             "approvals": decisions,
             "trace": [StepTrace(run_id=context.run_id, kind="approval", ok=decision.approved,
                                 tools_requested=[request["tool"] for request in requests])],

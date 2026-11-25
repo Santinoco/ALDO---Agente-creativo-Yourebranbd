@@ -286,3 +286,39 @@ def test_api_unknown_render_is_404(client, tmp_path, monkeypatch):
     thread = open_thread(client)
     assert client.get(f"/sessions/{thread}/renders/render-000000000000").status_code == 404
     assert client.get(f"/sessions/{thread}/renders/../../etc").status_code == 404
+
+
+def test_each_human_decision_restarts_the_step_and_call_limits(provider, ran):
+    """Dos rechazos seguidos: el agente vuelve a planear las dos veces sin chocar con los límites."""
+
+    def plan(args, ctx):
+        ran.append(("plan",))
+        return ToolResult(ok=True, content="plan listo")
+
+    def publish(args, ctx):
+        ran.append(("publish", args["item"]))
+        return ToolResult(ok=True, content="publicado")
+
+    reg = ToolRegistry()
+    # Tope de 1 por turno, como plan_video_edit: sin reiniciarlo, el segundo plan no correría.
+    reg.register(Tool("plan", "Planea", "compute", plan, max_calls_per_run=1))
+    reg.register(Tool("publish", "Publica algo", "local_write", publish, PublishArgs, idempotent=False,
+                      requires_approval=True))
+    # Con 3 pasos, plan + publish entran una vez. Sin reiniciar los pasos, el
+    # segundo plan llegaría con 3 de 3 y terminaría en el límite.
+    graph = build_graph(reg, max_steps=3)
+    plan_and_publish = [tool_turn(("plan", {})), tool_turn(("publish", {"item": "x"}))]
+
+    provider.script = list(plan_and_publish)
+    assert run_turn(graph, SESSION, "planealo").pending_approval
+
+    for comment in ("otra cosa", "tampoco"):
+        provider.script = list(plan_and_publish)
+        outcome = resume_turn(graph, SESSION, approved=False, comment=comment)
+        assert outcome.pending_approval, comment
+        assert all(step.kind != "step_limit" for step in outcome.trace)
+
+    provider.script = [text_turn("Listo.")]
+    outcome = resume_turn(graph, SESSION, approved=True)
+    assert outcome.reply == "Listo."
+    assert ran == [("plan",), ("plan",), ("plan",), ("publish", "x")]

@@ -267,6 +267,16 @@ class ToolRegistry:
                 self._calls.popitem(last=False)
             return True
 
+    def reset_calls(self, run_id: str) -> None:
+        """Vuelve a cero los topes de `run_id`. Lo usa el grafo cuando una persona decide en una pausa.
+
+        El tope frena un bucle del modelo. Después de una decisión humana, el
+        próximo intento lo pidió una persona, así que el contador empieza de nuevo.
+        """
+        with self._calls_lock:
+            for key in [key for key in self._calls if key[0] == run_id]:
+                del self._calls[key]
+
     def run(
         self,
         call: ToolCall,
