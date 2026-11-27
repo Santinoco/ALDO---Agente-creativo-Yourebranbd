@@ -199,6 +199,7 @@ function addIdeas(ideas) {
         <span class="chip">${idea.content_type === "ugc" ? "UGC" : "Diseño"}</span>
         <span class="chip">${escapeHtml(idea.format)}</span>
         <span class="chip">${escapeHtml(idea.pillar)}</span>
+        ${idea.refined_from ? `<span class="chip">ajuste de ${escapeHtml(idea.refined_from)}</span>` : ""}
       </div>
       <p>${escapeHtml(idea.description)}</p>
       <p class="why">${escapeHtml(idea.rationale)}</p>

@@ -28,7 +28,12 @@ from yourebrand.core.tools import (
 )
 from yourebrand.core.trace import emit
 from yourebrand.creative.context import MissingBrandError, load_brand, load_previous_posts
-from yourebrand.creative.ideas import MAX_IDEAS, NotEnoughIdeasError, generate_ideas_with_usage
+from yourebrand.creative.ideas import (
+    MAX_IDEAS,
+    NotEnoughIdeasError,
+    generate_ideas_with_usage,
+    refine_idea_with_usage,
+)
 from yourebrand.creative.schemas import ContentType, GeneratedIdea
 from yourebrand.creative.similarity import check_idea_similarity
 from yourebrand.core.media import MediaError
@@ -169,6 +174,80 @@ def generate_ideas_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResu
         },
     )
 
+
+def _unknown_ideas_result(missing: list[str], known: dict[str, GeneratedIdea]) -> ToolResult:
+    """Error para ids que no están en la sesión: le dice al modelo cuáles sí existen."""
+    return ToolResult(
+        ok=False,
+        content=f"No existen en esta conversación: {', '.join(missing)}. "
+        f"Ideas disponibles: {', '.join(known) or 'ninguna'}. Si recién las generaste, "
+        "llamá a esta tool en el paso siguiente.",
+        metadata={"error_type": "unknown_idea"},
+    )
+
+
+MAX_REFINE_COMMENT_CHARS = 1000
+
+
+class RefineIdeaArgs(BaseModel):
+    """El id y no el texto de la idea: se ajusta la idea real, no una copia reescrita por el modelo."""
+
+    idea_id: str = Field(description="Id de la idea de esta conversación que hay que ajustar.")
+    comment: str = Field(
+        max_length=MAX_REFINE_COMMENT_CHARS,
+        description="Qué quiere cambiar la persona, con sus palabras. No agregues cambios que no pidió.",
+    )
+
+    @field_validator("comment")
+    @classmethod
+    def _validate_comment(cls, value: str) -> str:
+        # Lo escribió la persona y va a otro modelo: misma validación que un mensaje.
+        return validate_user_text(value, max_len=MAX_REFINE_COMMENT_CHARS)
+
+
+def refine_idea_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolResult:
+    """Ajusta una idea de la sesión y la devuelve como idea nueva, con otro id."""
+    known = {idea.id: idea for idea in ctx.session_ideas}
+    original = known.get(args["idea_id"])
+    if original is None:
+        return _unknown_ideas_result([args["idea_id"]], known)
+
+    try:
+        refinement = refine_idea_with_usage(ctx.tenant, original, args["comment"], run_id=ctx.run_id)
+    except MissingBrandError:
+        return ToolResult(
+            ok=False,
+            content="La marca no tiene información cargada: no se puede ajustar la idea. Avisale a la persona.",
+            metadata={"error_type": "missing_brand"},
+        )
+    except LLMError as exc:
+        return ToolResult(
+            ok=False,
+            content=f"No se pudo ajustar la idea ({type(exc).__name__}). "
+            "Podés intentar de nuevo una vez o avisarle a la persona.",
+            metadata={"error_type": type(exc).__name__},
+        )
+
+    refined = GeneratedIdea(
+        id=_new_idea_id(),
+        content_type=original.content_type,
+        refined_from=original.id,
+        **refinement.idea.model_dump(),
+    )
+    payload = refined.model_dump()
+    return ToolResult(
+        ok=True,
+        content=json.dumps(payload, ensure_ascii=False),
+        # Va al estado como cualquier idea generada: así se puede volver a
+        # ajustar, verificar o guardar por su id.
+        metadata={
+            IDEAS_METADATA_KEY: [payload],
+            "count": 1,
+            **model_usage_metadata(refinement.usage.input_tokens, refinement.usage.output_tokens),
+        },
+    )
+
+
 class CheckSimilarityArgs(BaseModel):
     """Ids y no texto: así se verifica la idea real, no una versión reescrita por el modelo."""
 
@@ -183,13 +262,7 @@ def check_similarity_tool(args: dict[str, Any], ctx: ExecutionContext) -> ToolRe
     known = {idea.id: idea for idea in ctx.session_ideas}
     missing = [idea_id for idea_id in idea_ids if idea_id not in known]
     if missing:
-        return ToolResult(
-            ok=False,
-            content=f"No existen en esta conversación: {', '.join(missing)}. "
-            f"Ideas disponibles: {', '.join(known) or 'ninguna'}. Si recién las generaste, "
-            "llamá a esta tool en el paso siguiente.",
-            metadata={"error_type": "unknown_idea"},
-        )
+        return _unknown_ideas_result(missing, known)
 
     try:
         check = check_idea_similarity(ctx.tenant, [known[idea_id] for idea_id in idea_ids], run_id=ctx.run_id)
@@ -493,14 +566,34 @@ def build_creative_registry(
     )
     registry.register(
         Tool(
+            name="refine_idea",
+            description=(
+                "Ajusta una idea ya generada en esta conversación según un comentario de la persona y "
+                "devuelve una versión nueva, con otro id. La original se conserva, para que la persona "
+                "elija. Usala cuando pide cambiar algo de una idea concreta, o para alejar de lo ya "
+                "publicado una idea que check_similarity marcó como repetida. Si no queda claro a qué "
+                "idea se refiere, preguntale. Presentá la versión nueva con su id, sin reescribirla."
+            ),
+            kind="compute",
+            fn=refine_idea_tool,
+            args_model=RefineIdeaArgs,
+            timeout_s=generation_timeout_s,
+            retries=0,
+        )
+    )
+    registry.register(
+        Tool(
             name="check_similarity",
             description=(
                 "Compara ideas ya generadas en esta conversación contra lo que la marca publicó y dice, "
                 "por idea, si es 'repetida', 'parecida' o 'distinta', a qué post se parece y por qué. "
-                "Usala cuando una idea toque un tema, producto o formato que la marca ya publicó, o "
-                "cuando la persona pida evitar repetir. No hace falta para una idea claramente nueva. "
-                "Si es repetida, no la presentes así: cambiala o generá otra, una sola vez. Si es "
-                "parecida, mostrala y avisá a qué post se parece: decide la persona."
+                "Usala antes de presentar ideas cuando el pedido o alguna idea trate un tema, producto, "
+                "formato o serie que la marca ya publicó, o cuando la persona pida evitar repetir. Usala "
+                "aunque te parezca que la idea ya se diferencia: notar el parecido no reemplaza la "
+                "verificación, porque la persona necesita saber a qué post se parece y por qué. Ante la "
+                "duda, verificá: es una llamada rápida. Solo no hace falta para ideas sin relación con "
+                "nada publicado. Si es repetida, no la presentes así: ajustala con refine_idea o generá "
+                "otra, una sola vez. Si es parecida, mostrala y avisá a qué post se parece: decide la persona."
             ),
             kind="compute",
             fn=check_similarity_tool,

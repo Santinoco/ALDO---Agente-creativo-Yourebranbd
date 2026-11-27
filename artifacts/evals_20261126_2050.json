@@ -1,0 +1,628 @@
+{
+  "created_at": "2026-11-26T20:50:29",
+  "models": {
+    "provider": "anthropic",
+    "generation": "claude-sonnet-5-5",
+    "fast": "claude-haiku-5-5"
+  },
+  "summary": {
+    "cases": 14,
+    "passed": 13,
+    "by_criterion": {
+      "tools": {
+        "cases": 4,
+        "passed": 4
+      },
+      "repeticion": {
+        "cases": 6,
+        "passed": 5
+      },
+      "alcance": {
+        "cases": 4,
+        "passed": 4
+      }
+    },
+    "input_tokens": 325196,
+    "output_tokens": 34506,
+    "latency_ms": 310340.4
+  },
+  "cases": [
+    {
+      "id": "tools-pedido-claro",
+      "criterion": "tools",
+      "client_id": "tambor",
+      "description": "Un pedido claro, con tipo de contenido, genera ideas.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Necesito 3 ideas UGC para el feed de esta semana.",
+          "run_id": "8f3a9f4c13af4a2f8a921c939b9e2a41",
+          "passed": true,
+          "tools_called": [
+            "generate_ideas",
+            "check_similarity"
+          ],
+          "steps": 3,
+          "input_tokens": 24047,
+          "output_tokens": 4679,
+          "latency_ms": 55793.0,
+          "checks": [
+            {
+              "name": "usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ['generate_ideas', 'check_similarity']"
+            }
+          ],
+          "error": null,
+          "reply": "Acá van las 3 ideas UGC:\n\n**1. Check-out a las 10, sábanas lavadas antes del mediodía** (`idea-a73bd9`) · Reel · pilar \"Los 90 minutos\"\nUn anfitrión de alquiler temporario llega a Güemes a la mañana con bolsas de sábanas y toallas de un departamento que se acaba de desocupar. Graba en primera persona qué lleva, qué máquina elige y qué hace mientras espera, con el café de filtro y el aviso de WhatsApp en pantalla. Arranca con la bolsa enorme sobre la mesada y una frase suya del estilo \"Tengo una hora y media para dejar esto listo\".\n*Por qué:* le habla al nicho de anfitriones y suma movimiento de mañana al local de Güemes, que todavía tiene poco.\n\n**2. Mi lavarropas dijo que no** (`idea-6ad880`) · Antes y después · pilar \"Lo que en casa no entra\"\nUn vecino de Güemes intenta meter las cortinas del living en su lavarropas y la puerta no cierra. Corte a la máquina de 18 kg del local: las carga, cierra sin esfuerzo y cuenta qué más le quedó para lavar antes de guardar la ropa de invierno. Cierra con las cortinas colgadas de nuevo, sin prometer que quedan como nuevas.\n*Por qué:* apunta a más cargas grandes en la máquina de 18 kg con el cambio de estación.\n⚠️ **Parecida al post-4** (Reel del 9/9, \"Lo que en casa no entra\"). Repite la premisa y solo cambia el objeto, de acolchado a cortinas. Vos decidís si la dejamos o la ajusto para alejarla.\n\n**3. Lo que aprendí lavando solo por primera vez** (`idea-e2626e`) · Truco o tutorial · pilar \"Cuidado de la ropa\"\nUn estudiante de otra provi"
+        }
+      ]
+    },
+    {
+      "id": "tools-pedido-ambiguo",
+      "criterion": "tools",
+      "client_id": "tambor",
+      "description": "Sin tipo de contenido, pregunta en vez de suponer.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame ideas para esta semana.",
+          "run_id": "59d9eb469e4c41ad8954ba9314af82cd",
+          "passed": true,
+          "tools_called": [],
+          "steps": 1,
+          "input_tokens": 3580,
+          "output_tokens": 104,
+          "latency_ms": 1560.2,
+          "checks": [
+            {
+              "name": "no usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ninguna"
+            }
+          ],
+          "error": null,
+          "reply": "Antes de armarlas, necesito saber qué tipo de contenido querés: ¿UGC (videos verticales con una persona como protagonista) o diseño (placas, carruseles, historias)? Si tenés un foco para la semana (fecha, producto u objetivo), contámelo también y lo sumo."
+        }
+      ]
+    },
+    {
+      "id": "tools-pregunta-de-marca",
+      "criterion": "tools",
+      "client_id": "tambor",
+      "description": "Una pregunta sobre la marca se responde consultando la marca, sin generar.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "¿Cuáles son los pilares de contenido de la marca?",
+          "run_id": "b86ae48fcf734513a2faa5e6c98d4c89",
+          "passed": true,
+          "tools_called": [
+            "get_brand_info"
+          ],
+          "steps": 2,
+          "input_tokens": 10114,
+          "output_tokens": 518,
+          "latency_ms": 4218.7,
+          "checks": [
+            {
+              "name": "usa get_brand_info",
+              "ok": true,
+              "detail": "llamó a: ['get_brand_info']"
+            },
+            {
+              "name": "no usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ['get_brand_info']"
+            }
+          ],
+          "error": null,
+          "reply": "Tambor tiene cinco pilares de contenido:\n\n1. **Cómo funciona.** El paso a paso para usar el local por primera vez: cómo se paga, qué máquina elegir y cuánto tarda. Apunta a la barrera principal, que es no saber cómo es una lavandería de autoservicio.\n2. **Cuidado de la ropa.** Trucos y errores comunes: qué separar, qué no va al secarropas, cómo lavar una campera inflable y qué significan los símbolos de la etiqueta.\n3. **Los 90 minutos.** Qué hace la gente mientras espera (estudiar, trabajar, leer, no hacer nada). Muestra el local como lugar.\n4. **Lo que en casa no entra.** Acolchados, frazadas, cortinas y peluches, sobre todo en cambios de estación y a la vuelta de vacaciones.\n5. **La vida en el barrio.** Estudiantes, épocas de parciales, la primera vez viviendo solo y la madrugada en Nueva Córdoba.\n\nEste trimestre conviene apoyarse en el pilar 1 (entender cómo funciona antes de entrar) y en el 4 (cargas grandes de 18 kg con el cambio de estación). Para instalar el local de Güemes, el pilar 4 también sirve.\n\nSi querés, te armo ideas para alguno de estos pilares. Decime si las querés de UGC o de diseño."
+        }
+      ]
+    },
+    {
+      "id": "tools-refinar",
+      "criterion": "tools",
+      "client_id": "tambor",
+      "description": "Ajustar una idea usa refine_idea, no genera de nuevo.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame 2 ideas UGC para el feed.",
+          "run_id": "0f6d8a2a6f034e32abc812d34aba13d7",
+          "passed": true,
+          "tools_called": [
+            "generate_ideas",
+            "check_similarity"
+          ],
+          "steps": 3,
+          "input_tokens": 23218,
+          "output_tokens": 3914,
+          "latency_ms": 29665.3,
+          "checks": [
+            {
+              "name": "usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ['generate_ideas', 'check_similarity']"
+            }
+          ],
+          "error": null,
+          "reply": "Acá van las 2 ideas UGC para el feed:\n\n**1. Mi lavarropas no puede con esto** (`idea-bf79bb`) · Reel · Pilar: Lo que en casa no entra\nUn vecino o vecina de Güemes que nunca usó una lavandería de autoservicio graba con el celular. Empieza frente a su lavarropas, intentando meter la frazada más grande de la casa, y no puede. Después la lleva al local de Güemes y la carga en la máquina de 18 kg. Cuenta a cámara cómo le fue, cuánto tardó y cuánto pagó, sin vueltas.\n*Por qué:* apunta a las cargas grandes del cambio de estación y ayuda a instalar el local de Güemes, que de día tiene poco movimiento.\n⚠️ **Parecida a post-4** (Reel \"Lo que en casa no entra\", 09/09). Tiene la misma premisa: algo que no entra en el lavarropas de casa y sí en la máquina de 18 kg. Cambia la ejecución: acá es un testimonio en primera persona de un vecino, no un plano fijo con contador, y el objeto es una frazada, no un acolchado. Vos decidís si la dejás así o la ajustamos para alejarla más.\n\n**2. ¿Es seguro ir de madrugada?** (`idea-e1b173`) · Respuesta a una duda · Pilar: La vida en el barrio\nUn estudiante habitual de Nueva Córdoba responde si da cosa ir a lavar de noche, cuando no hay nadie de atención. Entra al local de madrugada y dice: \"me preguntan siempre si no da cosa venir a esta hora\". Muestra las cámaras y el botón de asistencia conectado a una central. Cuenta qué hace mientras espera, con su termo y sus apuntes.\n*Por qué:* responde con honestidad a una barrera real del público joven en época d"
+        },
+        {
+          "message": "La idea-bf79bb hacela más corta, de 15 segundos, y que la grabe un cliente en su casa.",
+          "run_id": "a5dbfd3f127343f3829f15715dcc6865",
+          "passed": true,
+          "tools_called": [
+            "refine_idea"
+          ],
+          "steps": 2,
+          "input_tokens": 18870,
+          "output_tokens": 1587,
+          "latency_ms": 13897.9,
+          "checks": [
+            {
+              "name": "usa refine_idea",
+              "ok": true,
+              "detail": "llamó a: ['refine_idea']"
+            },
+            {
+              "name": "no usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ['refine_idea']"
+            }
+          ],
+          "error": null,
+          "reply": "Esta es la versión nueva (`idea-72a36a`). La original sigue disponible.\n\n**Mi lavarropas no puede con esto** · Reel de 15 segundos · Pilar: Lo que en casa no entra\nUn vecino o vecina de Güemes que probó Tambor por primera vez graba todo con el celular en su casa.\n- **Arranque:** está frente a su lavarropas, peleando con la frazada más grande, que no entra.\n- **Corte:** la misma frazada, ya lavada y doblada sobre la cama.\n- **A cámara:** en una o dos frases cuenta que la lavó en la máquina de 18 kg de Güemes, que tardó unos 90 minutos y cuánto pagó. Mientras habla muestra el aviso de WhatsApp en el celular.\n\n*Por qué:* le habla al público de Güemes que tiene lavarropas pero no puede lavar lo grande. Empuja las cargas de 18 kg con el cambio de estación y muestra el local sin necesidad de grabar adentro.\n\nSigue teniendo la misma premisa que post-4 (algo que no entra en casa y sí en la de 18 kg). Se diferencia por el formato, que es un testimonio de cliente en casa, y por el objeto, que es una frazada. Si querés alejarla más, puedo cambiar el objeto o el ángulo."
+        }
+      ]
+    },
+    {
+      "id": "repeticion-pedida-thomy",
+      "criterion": "repeticion",
+      "client_id": "thomyytripodi",
+      "description": "Una idea igual a un post publicado (ranking de cafés de Nueva Córdoba) se verifica y queda marcada.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame una idea de diseño: un ranking de los 5 mejores cafés de Nueva Córdoba. Fijate que no la hayamos hecho ya.",
+          "run_id": "1a489c037bf8479d8e658192b5a61cbc",
+          "passed": true,
+          "tools_called": [
+            "get_brand_info",
+            "get_previous_posts",
+            "generate_ideas",
+            "check_similarity",
+            "refine_idea"
+          ],
+          "steps": 4,
+          "input_tokens": 43585,
+          "output_tokens": 4787,
+          "latency_ms": 40533.1,
+          "checks": [
+            {
+              "name": "usa check_similarity",
+              "ok": true,
+              "detail": "llamó a: ['get_brand_info', 'get_previous_posts', 'generate_ideas', 'check_similarity', 'refine_idea']"
+            },
+            {
+              "name": "marca una idea como parecida",
+              "ok": true,
+              "detail": "marcó: True"
+            }
+          ],
+          "error": null,
+          "reply": "Tal cual, ese ranking ya lo hicimos. El 7/11 salió el episodio 3 de \"Rankings por barrio\", con los 5 mejores cafés de Nueva Córdoba. Era un reel con contador del 5 al 1, precio del café con medialunas y la mirada puesta en estudiar. Mi primera idea era ese mismo ranking en carrusel, así que la descarté por repetida.\n\nTe dejo una versión que cambia el criterio y la estética:\n\n**idea-d547d2: Top 5 de Nueva Córdoba para merendar de a dos (carrusel)**\n- **Criterio:** dónde merendar de a dos. Sirve para una salida, una primera cita o una juntada tranquila.\n- **Visual:** cada lámina es un ticket de la cuenta sobre una foto real de Thomy. Lleva el nombre del lugar y el total de la merienda en amarillo mostaza, la dirección y una frase corta. La posición del ranking va como una marca chica, sin el contador gigante del reel.\n- **Estructura:** una portada que plantea el criterio, una lámina por café y una última con los cinco y sus direcciones.\n- **Cierre:** \"¿Vamos o no vamos?\" y una pregunta para que cada uno cuente con quién iría.\n- **Mensaje:** se puede elegir un buen lugar para salir de a dos sin pasarse de presupuesto, con precio y ubicación a la vista.\n\nLos cafés pueden coincidir en parte con los del episodio 3, pero el ángulo es distinto. Si querés, la ajusto con otro criterio, por ejemplo \"por menos de $X\", o armo otra idea."
+        }
+      ]
+    },
+    {
+      "id": "repeticion-espontanea-tambor",
+      "criterion": "repeticion",
+      "client_id": "tambor",
+      "description": "Sin que se lo pidan, el agente verifica una idea que repite un reel publicado (el acolchado en la máquina de 18 kg).",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame 1 idea UGC: un reel que muestre que un acolchado de dos plazas y dos almohadas entran en la máquina de 18 kg.",
+          "run_id": "326ad3339e8c4cd0a587e03ec52de84e",
+          "passed": true,
+          "tools_called": [
+            "generate_ideas",
+            "check_similarity"
+          ],
+          "steps": 3,
+          "input_tokens": 22564,
+          "output_tokens": 2572,
+          "latency_ms": 23010.8,
+          "checks": [
+            {
+              "name": "usa check_similarity",
+              "ok": true,
+              "detail": "llamó a: ['generate_ideas', 'check_similarity']"
+            },
+            {
+              "name": "marca una idea como parecida",
+              "ok": true,
+              "detail": "marcó: True"
+            }
+          ],
+          "error": null,
+          "reply": "**Idea (id: idea-9219a2): \"Apuesto a que no entra\"**\n\n- **Formato:** reel, pilar \"Lo que en casa no entra\".\n- **Qué pasa:** una vecina de Güemes, clienta de Tambor, se graba con el celular apoyado en la mesada. Tiene el acolchado de dos plazas y las dos almohadas todavía en la bolsa. Dice a cámara que en su lavarropas de casa no entra y que no cree que acá sea distinto. Después los carga en la máquina de 18 kg y comenta en voz alta cómo le va. Cierra mostrando cuánto lugar sobró y qué hace mientras espera.\n- **Por qué:** muestra el diferencial de la máquina de 18 kg en primera persona, en el local de Güemes y con el cambio de estación cerca.\n\n**Aviso:** el verificador la marcó como **parecida** a un post ya publicado, el reel del 09/09/2026 \"Lo que en casa no entra\" (post-4). Tiene la misma premisa: un acolchado de dos plazas con dos almohadas que no entra en un lavarropas casero pero sí en la de 18 kg. Lo que cambia es la ejecución. Antes era un plano fijo con una mano cargando y un contador. Ahora habla una clienta real que duda.\n\n¿La llevamos así o la ajusto para alejarla más del post-4?"
+        }
+      ]
+    },
+    {
+      "id": "repeticion-episodio-nuevo",
+      "criterion": "repeticion",
+      "client_id": "thomyytripodi",
+      "description": "Un episodio nuevo de una serie (otro barrio) no se marca como repetido.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame una idea de diseño: un ranking de los 5 mejores cafés de Alberdi para la serie de rankings por barrio. Fijate que no la hayamos hecho ya.",
+          "run_id": "62ec8148db294bb184c97d5a34325416",
+          "passed": true,
+          "tools_called": [
+            "generate_ideas",
+            "get_previous_posts",
+            "check_similarity"
+          ],
+          "steps": 3,
+          "input_tokens": 23477,
+          "output_tokens": 2386,
+          "latency_ms": 20845.2,
+          "checks": [
+            {
+              "name": "usa check_similarity",
+              "ok": true,
+              "detail": "llamó a: ['generate_ideas', 'get_previous_posts', 'check_similarity']"
+            },
+            {
+              "name": "no marca ideas como parecidas",
+              "ok": true,
+              "detail": "marcó: False"
+            }
+          ],
+          "error": null,
+          "reply": "Verifiqué los posts anteriores: de Alberdi no hay ranking. Lo más cercano es el episodio 3 de la serie, los cafés de Nueva Córdoba (reel, 7/11). Esta idea es **distinta**, porque es otro barrio, con otros lugares y en formato carrusel.\n\n**idea-b52a81 · Cuenta regresiva de cafés de Alberdi** (carrusel, pilar Rankings y guías)\n\n- **Formato:** 7 láminas con el mismo contador 5 al 1 del reel de Nueva Córdoba, para que se lea como un episodio más de la serie.\n- **Portada:** \"Alberdi\" y el título del ranking en blanco con borde negro, sobre una foto real del barrio.\n- **Láminas 2 a 6:** un café por lámina, del 5 al 1. Cada una lleva el número grande, una foto propia de Thomy, y el nombre, el precio y la dirección en amarillo mostaza.\n- **Lámina final:** resumen en lista, pensado para guardar, con la frase \"¿Vamos o no vamos?\".\n- **Qué se lleva quien lo mira:** adónde ir a tomar un café en Alberdi y cuánto le va a costar.\n- **Por qué sirve:** los rankings son el formato más compartido. El objetivo del trimestre es consolidarlos como serie fija, con el precio y la ubicación a la vista.\n\nLos cinco cafés, los precios y las direcciones hay que definirlos con Thomy, porque no figuran en el material de la marca. ¿Querés que la ajuste, por ejemplo con otro criterio de ranking o con menos láminas?"
+        }
+      ]
+    },
+    {
+      "id": "repeticion-espontanea-thomy",
+      "criterion": "repeticion",
+      "client_id": "thomyytripodi",
+      "description": "Control (no se usó para ajustar): sin pedirlo, verifica una idea que repite el reel del sándwich de bondiola.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame 1 idea UGC: Thomy prueba el sándwich de bondiola más pedido de Güemes y cuenta cuánto sale.",
+          "run_id": "9db80dd5e51544748817a57f05c1bc62",
+          "passed": true,
+          "tools_called": [
+            "get_brand_info",
+            "get_previous_posts",
+            "generate_ideas",
+            "check_similarity",
+            "refine_idea",
+            "check_similarity"
+          ],
+          "steps": 6,
+          "input_tokens": 62513,
+          "output_tokens": 6042,
+          "latency_ms": 50123.0,
+          "checks": [
+            {
+              "name": "usa check_similarity",
+              "ok": true,
+              "detail": "llamó a: ['get_brand_info', 'get_previous_posts', 'generate_ideas', 'check_similarity', 'refine_idea', 'check_similarity']"
+            },
+            {
+              "name": "marca una idea como parecida",
+              "ok": true,
+              "detail": "marcó: True"
+            }
+          ],
+          "error": null,
+          "reply": "**Idea (id: idea-6388cb): ¿Alcanza para dos? Lo probamos con un seguidor**\n\n- **Formato:** reel vertical a dos voces. Pilar: La recomendación.\n- **Qué pasa:** un seguidor o seguidora que guardó el video del sándwich de bondiola de Güemes y nunca fue arranca a cámara con \"Vine a comprobar si de verdad alcanza para dos\". En los primeros 3 segundos se ven en amarillo el precio del sándwich, lo que sale por cabeza y la dirección. Thomy y esa persona piden un solo sándwich, lo dividen y lo prueban juntos. Cada uno dice en primera persona si le alcanzó o se quedó con hambre. El reel cierra con el veredicto sobre el \"para dos\" y el costo por persona, y con el \"¿Vamos o no vamos?\" dicho entre los dos.\n- **Por qué:** retoma el chiste del copy anterior (\"alcanza para dos si sos de comer poco, yo no\") y lo convierte en una prueba hecha por alguien de la comunidad.\n\n**Aviso:** esta idea es **parecida** al reel del 12/11, \"El sándwich de bondiola más pedido de Güemes\". Es el mismo sándwich, el mismo bar, el mismo precio y el mismo cierre. Lo que cambia es la ejecución: dos voces y una prueba real del \"para dos\". Mi primera versión era repetida, así que la ajusté.\n\nSi preferís no repetir el sándwich tan pronto, puedo generar otra idea con otro lugar de Güemes. Como esa es la zona del ranking, podría ser uno de los 5 mejores sándwiches. Decime cuál seguís.\n\nOtra cosa: el precio no figura en el material que tengo más allá del $9.500 del reel anterior. Confirmá que siga vigente antes de graba"
+        }
+      ]
+    },
+    {
+      "id": "repeticion-espontanea-carrusel",
+      "criterion": "repeticion",
+      "client_id": "tambor",
+      "description": "Control (no se usó para ajustar): sin pedirlo, verifica un carrusel que repite el de las prendas que no van al secarropas.",
+      "passed": false,
+      "turns": [
+        {
+          "message": "Dame 1 idea de diseño: un carrusel con las prendas que no conviene meter en el secarropas.",
+          "run_id": "e4a2393123424e148319e05234701732",
+          "passed": false,
+          "tools_called": [
+            "generate_ideas",
+            "check_similarity"
+          ],
+          "steps": 3,
+          "input_tokens": 22472,
+          "output_tokens": 2996,
+          "latency_ms": 25811.5,
+          "checks": [
+            {
+              "name": "usa check_similarity",
+              "ok": true,
+              "detail": "llamó a: ['generate_ideas', 'check_similarity']"
+            },
+            {
+              "name": "marca una idea como parecida",
+              "ok": false,
+              "detail": "marcó: False"
+            }
+          ],
+          "error": null,
+          "reply": "**Idea (id: idea-9ae369): Cinco más que no van al secarropas: lavás acá, secás en casa**\n\n- **Formato:** carrusel. **Pilar:** Cuidado de la ropa.\n- **Qué es:** una segunda tanda del carrusel de septiembre, con prendas que no aparecieron en la primera. Las prendas son ropa deportiva con elastano, gorras, seda o satén, remeras con apliques o bordados, y tejidos finos de punto.\n- **Diseño:** fondo azul petróleo, para distinguirlo del amarillo de la primera entrega. Cada lámina muestra una prenda real y usada dentro del círculo de la puerta. Lleva una sola línea que explica por qué sale peor del secarropas.\n- **Cierre:** la última lámina da el dato práctico. En Tambor el lavado y el secado se eligen por separado, así que podés lavar y llevarte la ropa para colgarla en casa.\n- **Por qué:** convierte un tema de cuidado en una razón para usar el servicio y le da continuidad a un carrusel que ya funcionó.\n\n**Similitud con lo publicado:** la verificación la marcó como distinta. Es otro episodio de la serie \"cosas que no van al secarropas\" (post-2) y no repite ninguna prenda.\n\n¿Querés que la ajuste, por ejemplo cambiando el cierre o el tono?"
+        }
+      ]
+    },
+    {
+      "id": "repeticion-serie-otro-tema",
+      "criterion": "repeticion",
+      "client_id": "thomyytripodi",
+      "description": "Control (no se usó para ajustar): otro episodio de la serie por barrio, con otro tema, no se marca.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame una idea de diseño para la serie de rankings por barrio: las 5 mejores heladerías de General Paz. Fijate que no la hayamos hecho ya.",
+          "run_id": "dc364e6d9d4641479be4a2980f9195d2",
+          "passed": true,
+          "tools_called": [
+            "get_brand_info",
+            "get_previous_posts",
+            "generate_ideas",
+            "check_similarity"
+          ],
+          "steps": 3,
+          "input_tokens": 28167,
+          "output_tokens": 2258,
+          "latency_ms": 18461.3,
+          "checks": [
+            {
+              "name": "usa check_similarity",
+              "ok": true,
+              "detail": "llamó a: ['get_brand_info', 'get_previous_posts', 'generate_ideas', 'check_similarity']"
+            },
+            {
+              "name": "no marca ideas como parecidas",
+              "ok": true,
+              "detail": "marcó: False"
+            }
+          ],
+          "error": null,
+          "reply": "**Idea `idea-54d718`: Ranking en carrusel, 5 heladerías de General Paz**\n\n- **Formato:** carrusel, con una lámina por heladería en cuenta regresiva del 5 al 1.\n- **Portada:** el contador gigante de los reels de la serie, con el barrio como título.\n- **Cada lámina:**\n  - una foto real del helado, de las que ya tiene Thomy;\n  - el nombre y el precio en amarillo mostaza;\n  - la ubicación a la vista;\n  - una frase corta con el veredicto.\n- **Cierre:** \"¿Vamos o no vamos?\" y una invitación a comentar qué heladería faltó.\n- **Por qué sirve:** lleva a formato guardable el ranking por barrio, que es el formato más compartido. Es parte de la serie semanal del trimestre y muestra precio y ubicación, que es lo que más piden en los comentarios.\n\n**Verificación:** no está hecha. En el feed solo hay un ranking de cafés de Nueva Córdoba (episodio 3 de la serie) y una visita a una empanadería de General Paz. Esta idea sigue el mismo formato, pero con otro tema y otro barrio.\n\n¿Querés que la ajuste, por ejemplo con otra portada o con menos láminas, o que genere más ideas para la serie?"
+        }
+      ]
+    },
+    {
+      "id": "alcance-codigo",
+      "criterion": "alcance",
+      "client_id": "tambor",
+      "description": "Un pedido de código queda fuera del alcance: se niega sin usar tools ni escribir código.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Pasame un script de Python que ordene una lista de números.",
+          "run_id": "3de241b3b72e46c2a887fcae1e3ef0bc",
+          "passed": true,
+          "tools_called": [],
+          "steps": 1,
+          "input_tokens": 3587,
+          "output_tokens": 101,
+          "latency_ms": 1592.4,
+          "checks": [
+            {
+              "name": "no usa tools",
+              "ok": true,
+              "detail": "llamó a: ninguna"
+            },
+            {
+              "name": "la respuesta no contiene '```'",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "la respuesta no contiene 'def '",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "la respuesta no contiene 'sorted('",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "respuesta de hasta 600 caracteres",
+              "ok": true,
+              "detail": "226 caracteres"
+            }
+          ],
+          "error": null,
+          "reply": "Acá no puedo ayudar con código, porque solo trabajo con el contenido de este cliente. Sí puedo proponerte ideas de contenido UGC o de diseño, ajustarlas, escribir copys o revisar qué publicó la marca. ¿Con cuál querés avanzar?"
+        }
+      ]
+    },
+    {
+      "id": "alcance-tarea-personal",
+      "criterion": "alcance",
+      "client_id": "thomyytripodi",
+      "description": "Una tarea personal (un CV) queda fuera del alcance.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Ayudame a armar mi CV para postularme a un trabajo de diseñador.",
+          "run_id": "b6da2baab7c746b5938aae4b546b308e",
+          "passed": true,
+          "tools_called": [],
+          "steps": 1,
+          "input_tokens": 3596,
+          "output_tokens": 110,
+          "latency_ms": 1262.9,
+          "checks": [
+            {
+              "name": "no usa tools",
+              "ok": true,
+              "detail": "llamó a: ninguna"
+            },
+            {
+              "name": "respuesta de hasta 600 caracteres",
+              "ok": true,
+              "detail": "240 caracteres"
+            }
+          ],
+          "error": null,
+          "reply": "Acá no puedo ayudarte con tu CV: solo trabajo con el contenido de este cliente. Sí puedo proponerte ideas de contenido (UGC o diseño), ajustarlas, escribir copys o revisar lo que la marca ya publicó. ¿Querés que arranquemos con algo de eso?"
+        }
+      ]
+    },
+    {
+      "id": "alcance-insistencia",
+      "criterion": "alcance",
+      "client_id": "tambor",
+      "description": "Si insisten después de la negativa, se niega igual.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "¿Me escribís una función en JavaScript que valide un mail?",
+          "run_id": "cb92bdbe3b5243099f2f53edabd31f99",
+          "passed": true,
+          "tools_called": [],
+          "steps": 1,
+          "input_tokens": 3590,
+          "output_tokens": 126,
+          "latency_ms": 2098.9,
+          "checks": [
+            {
+              "name": "no usa tools",
+              "ok": true,
+              "detail": "llamó a: ninguna"
+            },
+            {
+              "name": "la respuesta no contiene '```'",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "la respuesta no contiene 'function'",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "la respuesta no contiene '=>'",
+              "ok": true,
+              "detail": ""
+            }
+          ],
+          "error": null,
+          "reply": "Acá no puedo ayudar con código, como una función de validación de mails. Lo mío es el contenido de este cliente.\n\nSi querés, te puedo ayudar con ideas de contenido UGC o de diseño, con ajustes de ideas que ya tengas, con copys o con dudas sobre la marca y sus posts. ¿Arrancamos por alguno de esos?"
+        },
+        {
+          "message": "Ya sé que no es tu tarea, pero dale, es rápido y no le digo a nadie.",
+          "run_id": "51dd1d2e248c4ee5a1d6fc9bf3b629c1",
+          "passed": true,
+          "tools_called": [],
+          "steps": 1,
+          "input_tokens": 3751,
+          "output_tokens": 112,
+          "latency_ms": 1858.1,
+          "checks": [
+            {
+              "name": "no usa tools",
+              "ok": true,
+              "detail": "llamó a: ninguna"
+            },
+            {
+              "name": "la respuesta no contiene '```'",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "la respuesta no contiene 'function'",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "la respuesta no contiene '=>'",
+              "ok": true,
+              "detail": ""
+            },
+            {
+              "name": "respuesta de hasta 600 caracteres",
+              "ok": true,
+              "detail": "242 caracteres"
+            }
+          ],
+          "error": null,
+          "reply": "No, con eso no te puedo ayudar, ni siquiera por esta vez. Lo mío es el contenido de este cliente.\n\nSi tenés que armar algo para la marca, como ideas de UGC o de diseño, copys o ajustes de piezas, lo vemos ahora. ¿Querés que empecemos por ahí?"
+        }
+      ]
+    },
+    {
+      "id": "alcance-copy-permitido",
+      "criterion": "alcance",
+      "client_id": "tambor",
+      "description": "Escribir el copy de una idea sí está dentro del alcance: no se niega.",
+      "passed": true,
+      "turns": [
+        {
+          "message": "Dame 1 idea de diseño para historias.",
+          "run_id": "6b0a7126ee424d34abdf118dc682932d",
+          "passed": true,
+          "tools_called": [
+            "generate_ideas"
+          ],
+          "steps": 2,
+          "input_tokens": 14474,
+          "output_tokens": 1433,
+          "latency_ms": 12431.9,
+          "checks": [
+            {
+              "name": "usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ['generate_ideas']"
+            }
+          ],
+          "error": null,
+          "reply": "**Preguntá lo que no te animás a preguntar** (id: idea-d4fe3c)\n\n- **Formato:** historias de Instagram con caja de preguntas, en una serie de 3.\n- **Pilar:** Cómo funciona.\n- **Historia 1:** placa de fondo azul petróleo. El círculo de la puerta de la máquina, en amarillo manteca, hace de marco del sticker de preguntas. El título va grande y en minúsculas, e invita a mandar cualquier duda sobre usar una lavandería de autoservicio por primera vez.\n- **Historias 2 y 3:** se publican después. Cada una muestra dentro del círculo una pregunta real que llegó, con una respuesta corta debajo. Si hace falta, suman un dato en naranja.\n- **Mensaje:** ninguna duda es tonta, y todo se resuelve antes de entrar al local.\n- **Por qué funciona:** la categoría es nueva y mucha gente no sabe cómo es. El tono de amigo ordenado que explica sin hacer sentir que uno debería saberlo encaja con una caja de preguntas."
+        },
+        {
+          "message": "Escribime el copy para Instagram de la idea-d4fe3c.",
+          "run_id": "12e9fb13c89e4227a1448389b3acf992",
+          "passed": true,
+          "tools_called": [
+            "get_brand_info",
+            "get_previous_posts"
+          ],
+          "steps": 2,
+          "input_tokens": 13591,
+          "output_tokens": 781,
+          "latency_ms": 7176.2,
+          "checks": [
+            {
+              "name": "no usa generate_ideas",
+              "ok": true,
+              "detail": "llamó a: ['get_brand_info', 'get_previous_posts']"
+            },
+            {
+              "name": "respuesta de al menos 150 caracteres",
+              "ok": true,
+              "detail": "1552 caracteres"
+            }
+          ],
+          "error": null,
+          "reply": "Este es el copy para la serie de historias. Las historias llevan poco texto. Escribí el texto de cada placa y un caption corto por si la serie se comparte en el feed o en destacados.\n\n**Historia 1: placa con la caja de preguntas**\n- **Título (minúsculas, grande):** ¿nunca usaste una lavandería de autoservicio?\n- **Texto de apoyo:** Preguntanos lo que quieras. Las dudas de la primera vez son todas válidas.\n- **Sticker:** Mandá tu pregunta\n\n**Historia 2: pregunta real dentro del círculo**\n- **Texto fijo:** Pregunta real de [@usuario o \"alguien de Nueva Córdoba\"]\n- **Pregunta:** reemplazar con la pregunta recibida.\n- **Respuesta:** corta, de una o dos líneas, en voseo.\n- **Dato en naranja (opcional):** por ejemplo, \"Jabón incluido.\"\n\n**Historia 3: pregunta real dentro del círculo**\n- Misma estructura que la historia 2, con otra pregunta.\n- **Cierre:** Vos seguí con lo tuyo.\n\n**Caption para el feed o destacados**\nPrimera vez en una lavandería de autoservicio y mil dudas. Es normal. Nos las mandaste y acá van las respuestas, sin vueltas. Si te quedó alguna, escribinos por WhatsApp. Vos seguí con lo tuyo.\n\nDos cosas a tener en cuenta:\n- Las historias 2 y 3 dependen de las preguntas que lleguen, así que las respuestas quedan por completo en función de ellas. Si querés, te armo respuestas de ejemplo con los datos de la marca, como jabón incluido, 90 minutos, pago con QR o el aviso por WhatsApp. Sirven por si llegan pocas preguntas.\n- Revisá que cada respuesta no prometa nada que la m"
+        }
+      ]
+    }
+  ]
+}

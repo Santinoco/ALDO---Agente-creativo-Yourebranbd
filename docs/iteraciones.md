@@ -12,13 +12,13 @@ El set de evaluación (`evals/`) se crea en la iteración 2 y crece en cada iter
 |---|---|---|---|---|
 | 0 | Base común (`core/`) | | | Hecha |
 | 1 | Creativo mínimo: ideas desde archivos | | | Hecha |
-| 2 | Agente con tools | 2/12 | Capacidad agéntica, skill, evaluación inicial | Casi cerrada: faltan `refine_idea`, `check_similarity` y `evals/` |
-| 2b | Edición de video de punta a punta | 25/11 | Human-in-the-loop (la pausa genérica), funcionamiento end-to-end | **Siguiente** |
-| 3 | Estado, HITL y Notion | 2/12 | Estado y memoria, human-in-the-loop, integración externa | Pendiente |
+| 2 | Agente con tools | 2/12 | Capacidad agéntica, skill, evaluación inicial | Hecha (26/11) |
+| 2b | Edición de video de punta a punta | 25/11 | Human-in-the-loop (la pausa genérica), funcionamiento end-to-end | Hecha (25/11) |
+| 3 | Estado, HITL y Notion | 2/12 | Estado y memoria, human-in-the-loop, integración externa | **Siguiente** |
 | 4 | Interfaz y reproducibilidad | 5/12 | Interfaz accesible, ejecución reproducible | Pendiente |
 | 5 | Evaluación y entrega | 9/12 | Evidencia de calidad, README, demo | Pendiente |
 
-La 2b se hace antes de cerrar la 2 y de empezar la 3, como excepción a la regla de arriba: es el avance que se muestra al profesor y al cliente. Lo que falta de la 2 se cierra junto con la 3.
+La 2b se hizo antes de cerrar la 2, como excepción a la regla de arriba: era el avance que se mostraba al profesor y al cliente. Las dos quedaron cerradas antes de empezar la 3.
 
 ---
 
@@ -94,6 +94,15 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 
 **Listo cuando:** desde la pantalla, en una misma conversación sobre `tambor`, se piden 5 ideas UGC, se refina una con un comentario y se hace una pregunta sobre la marca, y la traza muestra que el modelo eligió tools distintas en cada turno. Además, un pedido ambiguo hace que el agente pregunte sin generar, una idea parecida a un post de `tambor` queda marcada, y el set de evaluación corre y deja sus resultados en `artifacts/`.
 
+**Resultado (26/11):**
+- `refine_idea` devuelve la idea ajustada con un id nuevo y `refined_from`, sin pisar la original. `check_similarity` compara contra los posts con el modelo rápido y verifica que la respuesta cite posts que existen.
+- Se sumó al prompt del agente una sección de alcance: se niega a pedidos fuera del contenido de la marca (código, tareas personales) y sigue ayudando con lo que sí entra, como un copy.
+- Set de evaluación en `evals/cases.json` (14 casos sobre `tambor` y `thomyytripodi`) y su script, `python -m yourebrand.creative.evaluation`. Las verificaciones son deterministas: miran la traza del turno, no la opinión de otro modelo.
+- Primera corrida: 9/11. Fallaban dos casos de repetición: el agente no verificaba una idea repetida si no se lo pedían, y el juez marcaba como parecido un episodio nuevo de una serie. Se ajustaron la descripción de `check_similarity` y el criterio del juez, y se sumaron tres casos de control que no se usaron para ajustar.
+- Segunda corrida (`artifacts/evals_20261126_2050.json`): **13/14**. Tools 4/4, repetición 5/6, alcance 4/4.
+
+**Limitación conocida (va al README):** el caso de control `repeticion-espontanea-carrusel` falla. Si una idea repite un post suelto pero se presenta como "segunda tanda", el juez la toma como otro episodio de una serie y la marca como distinta. Corrección posible: que una serie cuente solo si lo ya publicado la muestra (episodios numerados o una serie con nombre). No se aplicó para no convertir ese caso de control en uno de ajuste.
+
 ---
 
 ## Iteración 2b: Edición de video de punta a punta
@@ -116,6 +125,8 @@ Es la iteración más pesada y la que más pesa en la nota: sin ella no hay dise
 - Persistencia SQLite: la pausa vive en el checkpointer en memoria hasta la iteración 3.
 
 **Listo cuando:** desde la pantalla se sube un video de `tambor`, el agente arma el plan, se pausa, se rechaza una vez con un comentario y el agente vuelve a planear, se aprueba, y el video editado se reproduce en la pantalla. La traza muestra la pausa y la decisión.
+
+**Resultado (25/11):** cumplido con un video de `thomyytripodi`. Al probarlo aparecieron y se corrigieron dos problemas: un segundo rechazo chocaba con el límite de pasos del turno (ahora cada decisión de la persona reinicia los pasos y los topes por tool), y la pantalla mezclaba conversaciones si se cambiaba de sesión mientras el agente respondía. Los cortes solo se hacen en silencios de 1 s o más (`protect_speech`). Pedidos que el render no sabe hacer, como una placa final, el plan los avisa en vez de inventarlos.
 
 ---
 

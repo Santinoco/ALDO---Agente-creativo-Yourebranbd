@@ -12,8 +12,8 @@ from yourebrand.core.errors import LLMOutputError
 from yourebrand.core.llm import LLMResponse, complete_structured, new_run_id
 from yourebrand.core.tenancy import TenantContext
 from yourebrand.creative.context import load_client_context
-from yourebrand.creative.prompts import build_idea_prompt, build_system_prompt
-from yourebrand.creative.schemas import ContentType, Idea, IdeaList
+from yourebrand.creative.prompts import build_idea_prompt, build_refine_prompt, build_system_prompt
+from yourebrand.creative.schemas import ContentType, GeneratedIdea, Idea, IdeaList
 
 logger = logging.getLogger(__name__)
 
@@ -94,3 +94,31 @@ def generate_ideas(
     `brief` es el foco opcional del pedido; quien llama ya lo validó.
     """
     return generate_ideas_with_usage(tenant, content_type, count, brief=brief, run_id=run_id).ideas
+
+
+@dataclass(frozen=True)
+class IdeaRefinement:
+    """Idea ajustada más el uso de la llamada al modelo."""
+
+    idea: Idea
+    usage: LLMResponse
+
+
+def refine_idea_with_usage(
+    tenant: TenantContext, idea: GeneratedIdea, comment: str, *, run_id: str | None = None
+) -> IdeaRefinement:
+    """Ajusta `idea` según `comment`, con el material del cliente y la skill de su tipo.
+
+    `comment` ya viene validado por quien llama. Devuelve la idea sin id: el id
+    nuevo lo pone la tool, igual que en generate_ideas.
+    """
+    run_id = run_id or new_run_id()
+    context = load_client_context(tenant)
+    result = complete_structured(
+        system=build_system_prompt(idea.content_type),
+        prompt=build_refine_prompt(context, idea, comment),
+        schema=Idea,
+        tenant=tenant,
+        run_id=run_id,
+    )
+    return IdeaRefinement(idea=result.data, usage=result.response)

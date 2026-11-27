@@ -45,6 +45,9 @@ class GeneratedIdea(Idea):
 
     id: NonEmptyStr
     content_type: ContentType
+    # Si es un ajuste de refine_idea, el id de la idea de la que salió. La
+    # original no se pisa: la persona elige después cuál guardar.
+    refined_from: str | None = None
 
 
 class IdeaList(BaseModel):

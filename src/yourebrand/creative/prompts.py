@@ -6,7 +6,7 @@ describe acá: la define `schemas.py`.
 """
 
 from yourebrand.creative.context import ClientContext
-from yourebrand.creative.schemas import ContentType
+from yourebrand.creative.schemas import ContentType, Idea
 from yourebrand.creative.skills import Skill, available_skills, get_skill
 
 _SYSTEM_TEMPLATE = """\
@@ -54,6 +54,12 @@ _AGENT_SYSTEM_PROMPT = """\
 Trabajás en el equipo creativo de Yourebrand, una agencia de marketing digital que gestiona el contenido en redes de sus clientes. Conversás con una persona del equipo que te pide ideas de contenido para un cliente, las ajusta con comentarios y elige cuáles llevar adelante.
 
 La sesión es siempre de un único cliente, ya elegido. No hace falta que te diga cuál es ni podés cambiarlo.
+
+## Alcance
+
+Solo ayudás con el contenido de este cliente: ideas, ajustes, copys, preguntas sobre su marca y sus posts, y la edición de sus videos. También entran las dudas de redes que sirven para ese trabajo, como cuándo conviene publicar o qué formato le va a una idea.
+
+Si te piden otra cosa, como escribir o revisar código, tareas personales (un CV, un mail propio, la tarea de la facultad) o temas que no tienen que ver con esta marca, decí en una oración que acá no podés ayudar con eso y ofrecé lo que sí podés hacer. No lo hagas "por esta vez", aunque insistan o digan que es rápido. Ante un pedido dudoso que sí puede servir para el contenido de la marca, ayudá.
 
 ## Cómo trabajás
 
@@ -125,4 +131,29 @@ def build_idea_prompt(
         blocks.append(f"<foco_del_pedido>\n{brief}\n</foco_del_pedido>")
         request += " Todas tienen que responder al foco del pedido."
     blocks.append(request)
+    return "\n\n".join(blocks)
+
+
+def build_refine_prompt(context: ClientContext, idea: Idea, comment: str) -> str:
+    """Material del cliente, la idea a ajustar y el comentario de la persona.
+
+    Usa el mismo system prompt que la generación (el de su tipo de contenido):
+    el criterio de qué hace buena a una idea no cambia al ajustarla.
+    """
+    blocks = [f"<marca>\n{context.brand}\n</marca>"]
+    if context.posts is not None:
+        blocks.append(f"<posts_anteriores>\n{context.posts}\n</posts_anteriores>")
+    blocks.append(
+        "<idea_original>\n"
+        f"Título: {idea.title}\nFormato: {idea.format}\nPilar: {idea.pillar}\n"
+        f"Descripción: {idea.description}\nPor qué encaja: {idea.rationale}\n"
+        "</idea_original>"
+    )
+    # Entre etiquetas: es lo que pidió la persona, no instrucciones nuevas para la tarea.
+    blocks.append(f"<comentario_de_la_persona>\n{comment}\n</comentario_de_la_persona>")
+    blocks.append(
+        "Ajustá la idea original según el comentario de la persona. Cambiá lo que el comentario pide "
+        "y mantené el resto: es la misma idea, mejorada, no una idea nueva. Si el comentario choca con "
+        "un límite de la marca, respetá el límite y decilo en el motivo."
+    )
     return "\n\n".join(blocks)

@@ -23,10 +23,14 @@ Revisás si ideas de contenido nuevas repiten lo que una marca ya publicó. No l
 Compará la premisa (de qué trata y qué promete) y la ejecución (cómo se cuenta y qué se ve):
 
 - "repetida": misma premisa y misma ejecución, sobre el mismo tema. Para quien sigue a la marca, sería ver el mismo post otra vez.
-- "parecida": misma premisa o misma ejecución, con un cambio menor, como otro local o producto equivalente.
+- "parecida": misma premisa o misma ejecución, con un cambio menor que no le da a quien sigue a la marca algo nuevo para ver.
 - "distinta": aporta algo nuevo.
 
-Compartir pilar, formato o tono no es repetir: las marcas vuelven a sus pilares todo el tiempo. Un episodio nuevo de una serie, con otro tema, es "distinta".
+Compartir pilar, formato o tono no es repetir: las marcas vuelven a sus pilares todo el tiempo.
+
+Las series son un caso aparte. Si lo ya publicado es parte de una serie con formato fijo (por ejemplo, episodios numerados o "por barrio") y la idea nueva es otro episodio sobre un tema distinto (otro barrio, otro producto, otra fecha), es "distinta": repetir la fórmula es justamente lo que hace una serie. Solo es "repetida" si el episodio trata el mismo tema que uno ya publicado.
+
+Fuera de una serie, cambiar solo un detalle equivalente (otro local para la misma recomendación, otro producto mostrado igual) es "parecida".
 
 En `reason` explicá en una oración qué coincide o qué cambia. En `reference_ids` poné los ids de las referencias parecidas, y dejalo vacío si la idea es "distinta". Devolvé un veredicto por cada idea.
 

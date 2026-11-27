@@ -87,7 +87,7 @@ def test_graph_passes_session_ideas_across_turns(monkeypatch):
         model_generation="g", model_fast="f", llm_timeout_seconds=30, llm_max_retries=0))
     monkeypatch.setattr(llm, "call_with_retry", partial(call_with_retry, sleep=lambda s: None))
     monkeypatch.setattr(tools, "generate_ideas_with_usage", lambda *a, **k: SimpleNamespace(
-        ideas=[Idea(**IDEA.model_dump(exclude={"id", "content_type"}))], usage=SimpleNamespace(input_tokens=1, output_tokens=1)))
+        ideas=[Idea(**IDEA.model_dump(exclude={"id", "content_type", "refined_from"}))], usage=SimpleNamespace(input_tokens=1, output_tokens=1)))
     monkeypatch.setattr(tools, "_new_idea_id", lambda: IDEA.id)
     answer(monkeypatch, verdict("distinta", ["post-1"]))
 

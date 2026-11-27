@@ -120,17 +120,18 @@ La lógica de negocio no vive en `api/`: el agente tiene que poder usarse y prob
 Hecho:
 
 - `core/`: `config.py`, `tenancy.py`, `providers/` (contrato en `base.py`, un módulo por proveedor: Gemini y Anthropic), `llm.py` (`complete`, `complete_structured` y turnos con tools), `tools.py` (runtime de tools, con `requires_approval`), `trace.py`, `errors.py`, `reliability.py`, `storage.py`, `media.py`, `video_prep.py` y `transcription.py`, con tests.
-- `creative/`: grafo de LangGraph (`graph.py`), tools `get_brand_info`, `get_previous_posts`, `generate_ideas`, `load_skill` y `plan_video_edit`, las skills `ugc-ideation`, `design-ideation` y `ugc-video-editing`, y la base del render en `video_render.py` (todavía sin conectar al agente).
-- `api/`: FastAPI con clientes, sesiones, mensajes y subida de videos, y la pantalla de demo con la traza de cada turno.
-- Cliente ficticio `data/tambor/` con `brand.md` y `posts.md`.
+- `creative/`: grafo de LangGraph (`graph.py`) con pausa de aprobación genérica, tools `get_brand_info`, `get_previous_posts`, `generate_ideas`, `refine_idea`, `check_similarity` (`similarity.py`), `load_skill`, `plan_video_edit` y `render_video`, las skills `ugc-ideation`, `design-ideation` y `ugc-video-editing`, la sección de alcance en el prompt del agente y el script de evaluación (`evaluation.py`).
+- `api/`: FastAPI con clientes, sesiones, mensajes, subida de videos, aprobaciones y renders, y la pantalla de demo con la traza de cada turno.
+- Clientes ficticios `data/tambor/` y `data/thomyytripodi/` (marca personal), cada uno con `brand.md` y `posts.md`.
+- `evals/cases.json`: 14 casos; última corrida 13/14 (`artifacts/evals_20261126_2050.json`). El detalle y la limitación conocida están en `docs/iteraciones.md`.
 
 Lo ya escrito no se tira: `generate_ideas` pasa a ser el interior de una tool, `context.py` el de las tools de lectura, y las guías de `prompts.py` se convierten en skills.
 
 Plan hasta la entrega, en orden. El detalle de cada iteración (qué implementar, qué no y cuándo está lista) está en `docs/iteraciones.md`. Antes de implementar algo, verificar a qué iteración pertenece; no se empieza una sin cerrar la anterior.
 
-- **Iteración 2: agente con tools (casi cerrada).** Hecho: soporte de tools en `core/`, grafo de LangGraph, tools de lectura, `generate_ideas`, `load_skill`, las skills y la pantalla de demo con traza. Falta: `refine_idea`, `check_similarity` y el set de evaluación inicial en `evals/` con su script.
-- **Iteración 2b, SIGUIENTE: edición de video de punta a punta (hasta el 25/11).** Se hace antes que el resto porque es el avance que se muestra al profesor y al cliente. Pausa de aprobación genérica en el grafo (cualquier tool con `requires_approval`), tool `render_video`, endpoints para resolver la pausa y seguir el render, y la pantalla con la aprobación y el video final. La misma pausa la usa después `save_ideas_to_notion`.
-- **Cierre de la iteración 2 e iteración 3: estado, HITL y Notion (hasta el 2/12).** Lo que falta de la 2, checkpointer SQLite, `save_ideas_to_notion` sobre la pausa ya hecha, `check_similarity` también contra las ideas guardadas en Notion, segundo cliente ficticio, test de aislamiento, casos nuevos en el set de evaluación.
+- **Iteración 2: agente con tools (cerrada el 26/11).**
+- **Iteración 2b: edición de video de punta a punta (cerrada el 25/11).** La pausa de aprobación genérica que armó es la que usa después `save_ideas_to_notion`.
+- **Iteración 3, SIGUIENTE: estado, HITL y Notion (hasta el 2/12).** Checkpointer SQLite, `save_ideas_to_notion` sobre la pausa ya hecha, aprobar, modificar o rechazar en la pausa, `check_similarity` también contra las ideas guardadas en Notion, test de aislamiento, casos nuevos en el set de evaluación.
 - **Iteración 4: interfaz y reproducibilidad (hasta el 5/12).** Lo que falte de la pantalla, Docker Compose, casos del recorrido de la demo en el set de evaluación.
 - **Iteración 5: evaluación y entrega (hasta el 9/12).** Correr el set completo, resultados y métricas en `artifacts/`, `README.md` con las 13 secciones y el diagrama, video de respaldo, tag `v1.0-tfi`.
 
